@@ -1,4 +1,4 @@
-# Aternos 24/7 Hosting Bot
+# Minecraft AFK Bot (VirgoBot)
 
 A Minecraft bot that joins your server and keeps it alive around the clock.
 It reconnects automatically if kicked or if the server restarts, and can be
@@ -339,6 +339,8 @@ provider or dashboard secrets in `settings.json` or commit them:
 | `OPENAI_MODEL` | Optional OpenAI model override; defaults to `gpt-5.5` |
 | `OPENAI_REASONING_EFFORT` | OpenAI reasoning level: `low`, `medium`, `high`, or `xhigh` (defaults to `low`) |
 | `DASHBOARD_TOKEN` | Required private token for submitting and stopping tasks from the dashboard |
+| `DISCORD_RELAY_TOKEN` | Secret for `POST /api/discord/chat`. If unset, the relay only accepts a valid `DASHBOARD_TOKEN` |
+| `HOST` | Interface the web server binds to. Defaults to `127.0.0.1`, or `0.0.0.0` when the host platform sets `PORT` |
 
 To use Lunax, add `LUNAX_API_KEY` to `.env`; `AI_PROVIDER=auto` selects it
 when present and uses `lunax-chat` at `https://lunax.co/api/v1/chat/completions`.

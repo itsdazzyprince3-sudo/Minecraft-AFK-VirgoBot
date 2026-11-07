@@ -34,6 +34,9 @@ const { resolveBotVersion } = require('./lib/version');
 const app = express();
 app.use(express.json({ limit: '8kb' }));
 const PORT = process.env.PORT || 5000;
+// Bind to loopback unless HOST is set. Hosting platforms that inject PORT (Render, Replit, etc.)
+// need an external interface, so default to 0.0.0.0 only when PORT is provided by the environment.
+const HOST = process.env.HOST || (process.env.PORT ? '0.0.0.0' : '127.0.0.1');
 
 let bot = null;
 let activeIntervals = [];
@@ -138,6 +141,14 @@ function hasDashboardAccess(req) {
   const expectedBuffer = Buffer.from(expected);
   const providedBuffer = Buffer.from(provided);
   return expectedBuffer.length === providedBuffer.length &&
+    crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+}
+
+function secretsMatch(expected, provided) {
+  const expectedBuffer = Buffer.from(String(expected || ''));
+  const providedBuffer = Buffer.from(String(provided || ''));
+  return expectedBuffer.length > 0 &&
+    expectedBuffer.length === providedBuffer.length &&
     crypto.timingSafeEqual(expectedBuffer, providedBuffer);
 }
 
@@ -508,7 +519,7 @@ app.get('/', (req, res) => {
             btn.addEventListener('click', async () => {
               const dir = btn.dataset.aim;
               try {
-                const health = await fetch('/health');
+                const health = await fetch('/health', { headers: { 'x-dashboard-token': dashboardTokenInput.value } });
                 const hData = await health.json();
                 const coords = hData.coords || { x: 0, y: 64, z: 0 };
                 let target = { ...coords };
@@ -633,8 +644,17 @@ app.get('/', (req, res) => {
           async function updateRadar() {
             if (!radarCtx) return;
             try {
-              const res = await fetch('/api/radar');
+              const res = await fetch('/api/radar', { headers: { 'x-dashboard-token': dashboardTokenInput.value } });
               const data = await res.json();
+              if (res.status === 401) {
+                radarCtx.clearRect(0, 0, 240, 240);
+                radarCtx.fillStyle = '#64748b';
+                radarCtx.font = '12px sans-serif';
+                radarCtx.textAlign = 'center';
+                radarCtx.fillText('Enter dashboard token', 120, 120);
+                if (radarSummary) radarSummary.innerText = 'Token required';
+                return;
+              }
               if (!data.connected) {
                 radarCtx.clearRect(0, 0, 240, 240);
                 radarCtx.fillStyle = '#64748b';
@@ -844,7 +864,7 @@ app.get('/health', (req, res) => {
     status: botState.connected ? 'connected' : 'disconnected',
     serverOffline: Boolean(botState.serverOffline),
     uptime: Math.floor((Date.now() - botState.startTime) / 1000),
-    coords: (bot && bot.entity) ? bot.entity.position : null,
+    coords: (bot && bot.entity && hasDashboardAccess(req)) ? bot.entity.position : null,
     lastActivity: botState.lastActivity,
     lastDisconnectReason: botState.serverOffline
       ? '⚠️ Server is OFFLINE. Please turn on your server! (Bot will keep reconnecting automatically)'
@@ -855,6 +875,9 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/api/radar', (req, res) => {
+  if (!hasDashboardAccess(req)) {
+    return res.status(401).json({ error: 'Dashboard token required.' });
+  }
   if (!bot || !botState.connected || !bot.entity) {
     return res.json({
       connected: false,
@@ -961,10 +984,10 @@ app.post('/api/discord/chat', (req, res) => {
   const secretProvided = req.headers['x-discord-token'] || req.body?.token;
   const configuredSecret = process.env.DISCORD_RELAY_TOKEN || config.discord?.relaySecret;
 
-  if (configuredSecret && secretProvided !== configuredSecret) {
-    if (!hasDashboardAccess(req)) {
-      return res.status(401).json({ error: 'Unauthorized: invalid Discord relay token.' });
-    }
+  // Fail closed: with no relay secret configured, only a valid dashboard token is accepted.
+  const authorized = secretsMatch(configuredSecret, secretProvided) || hasDashboardAccess(req);
+  if (!authorized) {
+    return res.status(401).json({ error: 'Unauthorized: invalid Discord relay token.' });
   }
 
   const username = String(req.body?.username || 'DiscordUser').trim().slice(0, 32);
@@ -1092,7 +1115,7 @@ app.post('/api/agent/stop', (req, res) => {
 
 app.get('/ping', (req, res) => res.send('pong'));
 
-const server = app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, HOST, () => {
   console.log(`[Server] HTTP server started on port ${server.address().port}`);
 });
 
@@ -1100,7 +1123,7 @@ server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
     const fallbackPort = PORT + 1;
     console.log(`[Server] Port ${PORT} in use - trying port ${fallbackPort}`);
-    app.listen(fallbackPort, '0.0.0.0', () => {
+    app.listen(fallbackPort, HOST, () => {
       console.log(`[Server] HTTP server started on fallback port ${fallbackPort}`);
     });
   } else {

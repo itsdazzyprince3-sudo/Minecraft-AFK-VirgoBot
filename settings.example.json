@@ -63,7 +63,7 @@
     "combat": true,
     "beds": false,
     "chat": true,
-    "console-commands": true
+    "console-commands": false
   },
   "ai": {
     "enabled": false,
