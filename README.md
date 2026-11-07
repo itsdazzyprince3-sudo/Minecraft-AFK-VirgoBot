@@ -36,6 +36,21 @@ settings. The bundled small model is useful for short conversation; deterministi
 Minecraft skills handle most actions directly so gameplay does not depend on a
 large model planning every step.
 
+### Live 3D view (see what the bot sees)
+
+Start the bot with `BOT_VIEWER=1` (or set `view.browser.enabled` to `true` in
+`settings.json`) and a `DASHBOARD_TOKEN`. The dashboard then shows a **3D view**
+card: enter the token, press **Open 3D view**, and a first-person view of the bot's
+world appears next to the movement controls. It uses `prismarine-viewer` and the
+native `canvas` package, both optional; install them with
+`npm install prismarine-viewer canvas` if `npm install` skipped them.
+
+The view runs on port `3007` (`VIEWER_PORT`), binds to `127.0.0.1` unless `HOST` or
+`VIEWER_HOST` is set, and requires the dashboard token. It shows a render of the
+chunks the bot has loaded, not the official game client. To use it on a phone or
+another computer, run the bot on that device or open the port through your own
+tunnel, and keep `DASHBOARD_TOKEN` secret.
+
 ### AI chat and survival behavior
 
 Enable `ai.enabled` in your private `settings.json`, then add trusted Minecraft

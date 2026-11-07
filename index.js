@@ -21,6 +21,7 @@ const { installProtocolPacketCompatibility } = require('./lib/protocol-packet-co
 const pluginLoader = require('./lib/plugin-loader');
 const { FrameServer } = require('./lib/frame-server');
 const { VisionController } = require('./lib/vision-controller');
+const { BrowserViewer } = require('./lib/browser-viewer');
 const settingsPath = require('node:path').join(__dirname, 'settings.json');
 if (!fs.existsSync(settingsPath)) {
   throw new Error('Missing settings.json. Copy settings.example.json to settings.json and configure your server before starting the bot.');
@@ -133,6 +134,21 @@ if (process.env.BOT_VISION === '1' || config.vision?.enabled === true) {
   visionController = createVisionController();
   visionController.start();
 }
+
+// Optional browser 3D view of the bot's eyes (BOT_VIEWER=1 or view.browser.enabled). Needs DASHBOARD_TOKEN.
+const browserViewerEnabled = process.env.BOT_VIEWER === '1' || config.view?.browser?.enabled === true;
+const browserViewerPort = Number(process.env.VIEWER_PORT) || config.view?.browser?.port || 3007;
+const browserViewer = browserViewerEnabled
+  ? new BrowserViewer({
+      port: browserViewerPort,
+      host: process.env.VIEWER_HOST || process.env.HOST || '127.0.0.1',
+      token: process.env.DASHBOARD_TOKEN,
+      viewDistance: Number(process.env.VIEWER_DISTANCE) || config.view?.browser?.viewDistance || 6,
+      firstPerson: config.view?.browser?.firstPerson !== false,
+      log: message => console.log(message)
+    })
+  : null;
+const browserViewerActive = Boolean(browserViewer && browserViewer.start());
 
 function hasDashboardAccess(req) {
   const expected = process.env.DASHBOARD_TOKEN;
@@ -321,6 +337,21 @@ app.get('/', (req, res) => {
               </div>
             </div>
           </div>
+          ${browserViewerActive ? `<div class="card">
+            <div class="label">3D view (bot's eyes)</div>
+            <p class="control-help">Enter the dashboard token below, then open the live first-person view. Use the controls under it to move the bot.</p>
+            <button class="control-key" type="button" id="open-3d-view">Open 3D view</button>
+            <iframe id="view-3d" title="Bot 3D view" style="display:none;width:100%;height:360px;border:0;border-radius:8px;margin-top:8px;background:#000"></iframe>
+            <script>
+              document.getElementById('open-3d-view').addEventListener('click', function () {
+                var token = document.getElementById('dashboard-token').value;
+                if (!token) { alert('Enter the dashboard token first.'); return; }
+                var frame = document.getElementById('view-3d');
+                frame.src = location.protocol + '//' + location.hostname + ':${browserViewerPort}/?token=' + encodeURIComponent(token);
+                frame.style.display = 'block';
+              });
+            </script>
+          </div>` : ''}
           <div class="card">
             <div class="label">Manual bot controls</div>
             <p class="control-help">Use W/A/S/D to move, Space to jump, Shift to sneak, Ctrl to sprint. Press Q to drop held items, Left-Click to attack/mine, Right-Click to use/place, F to swap offhand, and 1-9 for hotbar slots.</p>
@@ -1345,6 +1376,7 @@ function createBot() {
 
       console.log(`[Bot] Spawned on server (version: ${bot.version})`);
       pluginLoader.onBotReady(bot);
+      if (browserViewerActive) browserViewer.attach(bot);
 
       if (config.discord?.events?.connect) {
         sendDiscordWebhook(`Connected to \`${config.server.ip}\``, 0x4ade80);
@@ -1429,6 +1461,7 @@ function createBot() {
       const disconnectReason = kickedReason || String(reason || 'Unknown');
       console.log(`[Bot] Disconnected: ${disconnectReason}`);
       pluginLoader.onBotEnd(bot);
+      if (browserViewerActive) browserViewer.detach();
       botState.connected = false;
       manualControlSession.disconnect();
       botState.lastDisconnectReason = disconnectReason;
