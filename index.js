@@ -12,7 +12,8 @@ const {
   createTrustedChatMemoryNote,
   getAIChatAllowedUsers,
   isAIChatAuthorized,
-  parseAIChatCommand
+  parseAIChatCommand,
+  shouldAutoRespondToChat
 } = require('./lib/ai-chat');
 const { parseLocalIntent } = require('./lib/ai-brain');
 const { detectLanguage, reply: localizedReply } = require('./lib/ai-nlp');
@@ -2490,7 +2491,10 @@ function chatModule(bot) {
           shouldHandle = true;
         } else {
           const parsed = parseLocalIntent(cleanedMessage);
-          shouldHandle = parsed.type !== 'chat' || parsed.intent === 'question';
+          // Natural conversation is opt-in and limited to the configured allowlist.
+          // Recognized action requests and questions still work when this is off.
+          shouldHandle = shouldAutoRespondToChat(username, config.ai, aiAllowedUsers) ||
+            parsed.type !== 'chat' || parsed.intent === 'question';
         }
       }
       if (shouldHandle) {

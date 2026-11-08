@@ -60,6 +60,8 @@ test('automatic AI chat replies require opt-in and an AI-specific allowed user',
   assert.equal(shouldAutoRespondToChat('commotozze', config), true);
   assert.equal(shouldAutoRespondToChat('other', config), false);
   assert.equal(shouldAutoRespondToChat('Virgo', { ...config, allowedUsers: [], tpWhitelist: ['Virgo'] }), false);
+  assert.equal(shouldAutoRespondToChat('Owner', config, ['commotozze', 'owner']), true);
+  assert.equal(shouldAutoRespondToChat('stranger', config, ['commotozze', 'owner']), false);
   assert.equal(shouldAutoRespondToChat('commotozze', { ...config, enabled: false }), false);
   assert.equal(shouldAutoRespondToChat('commotozze', { ...config, respondToTrustedChat: false }), false);
 });

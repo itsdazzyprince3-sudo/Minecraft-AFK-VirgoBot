@@ -66,9 +66,9 @@
     "console-commands": true
   },
   "ai": {
-    "enabled": false,
-    "allowedUsers": [],
-    "respondToTrustedChat": false,
+    "enabled": true,
+    "allowedUsers": ["YOUR_MINECRAFT_USERNAME"],
+    "respondToTrustedChat": true,
     "memory": true,
     "memoryMaxNotes": 100,
     "learnFromAllowlistedChat": false,

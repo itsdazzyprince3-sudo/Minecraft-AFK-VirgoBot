@@ -27,24 +27,36 @@ the on-screen buttons to move; Space jumps, Shift sneaks, and Ctrl sprints.
 Manual input pauses the patrol until all controls are released. Held inputs
 automatically release if the dashboard stops sending its control heartbeat.
 
-AI and dashboard secrets belong in the ignored `.env` file. Local play works
-without a cloud API key: install Ollama, pull the model configured under
-`ai.ollama`, and set `ai.provider` to `auto` or `local`. With `auto`, the bot
-uses Ollama when `AI_API_KEY` is absent and uses the configured cloud provider
-when a key is present. Set `OLLAMA_URL` or `OLLAMA_MODEL` to override the local
-settings. The bundled small model is useful for short conversation; deterministic
-Minecraft skills handle most actions directly so gameplay does not depend on a
-large model planning every step.
+AI and dashboard secrets belong in the ignored `.env` file. A language model is
+required for genuine open-ended conversation and flexible reasoning; without
+one, the bot can still run its deterministic Minecraft skills but its fallback
+conversation is limited. For a local setup, install Ollama on the same machine
+as the bot, run `ollama pull qwen2.5:1.5b`, and keep `ai.provider` set to `auto`
+or `local`. With `auto`, the bot uses Ollama when no cloud API key is present and
+uses the configured cloud provider when a key is present. Set `OLLAMA_URL` or
+`OLLAMA_MODEL` to override the local settings. If the bot is hosted remotely,
+`127.0.0.1` means the bot host—not your PC—so run a model endpoint where the bot
+can reach it or configure a supported cloud provider. Deterministic Minecraft
+skills handle actions and verify game state, so gameplay does not depend on the
+language model inventing or directly executing game commands.
 
 ### AI chat and survival behavior
 
-Enable `ai.enabled` in your private `settings.json`, then add trusted Minecraft
-usernames to `ai.allowedUsers` or `chat.tpWhitelist`. The bot combines both
-lists. Restart the active process after editing settings. Startup logs show the
-trusted names. Usernames are matched without case sensitivity. Use `!ai help`
-for commands. Examples: `!ai hello`, `!ai come`, `!ai follow me`, `!ai mine 8
-stone`, `!ai craft wooden_pickaxe`, `!ai grind wood`, `!ai status`, `!ai teach
-keep three logs`, and `!ai stop`.
+Copy `settings.example.json` to the ignored `settings.json`, enter your server
+details, and replace `YOUR_MINECRAFT_USERNAME` under `ai.allowedUsers` with your
+Minecraft account name. The example enables AI and replies to ordinary chat
+from allowlisted players; strangers remain unauthorized. The bot combines
+`ai.allowedUsers` and `chat.tpWhitelist`. Usernames are case-insensitive. Make
+sure an Ollama or cloud model is reachable as described above for natural
+conversation. Restart the bot after editing settings.
+
+You can talk naturally (for example, `Virgo, what should I do before night?`) or
+ask it to act (`Virgo, gather wood and make a stone pickaxe`). The AI can answer
+questions, inspect the live game state, build a multi-step plan, call its
+Minecraft skills, and verify the result. Use `!ai help` for the full command
+list. Examples: `!ai come`, `!ai follow me`, `!ai mine 8 stone`, `!ai craft
+wooden_pickaxe`, `!ai grind wood`, `!ai status`, `!ai teach keep three logs`,
+and `!ai stop`. Autonomous grinding remains off until explicitly enabled.
 
 The bot also builds a skill catalog from the installed Minecraft data: mining,
 crafting, smelting, equipping, hunting, breeding, and delivery entries for every
