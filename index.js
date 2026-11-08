@@ -1926,6 +1926,14 @@ function createBot() {
 
   } catch (err) {
     console.log(`[Bot] Failed to create bot: ${err.message}`);
+    if (err.code === 'ERR_UNSUPPORTED_MINECRAFT_VERSION') {
+      botState.connected = false;
+      botState.serverOffline = false;
+      botState.lastDisconnectReason = err.message;
+      pushError({ type: 'error', message: err.message, time: Date.now() });
+      console.error('[Compatibility] Fix the server/proxy version mismatch before reconnecting.');
+      return;
+    }
     if (isServerOfflineError(err)) {
       botState.serverOffline = true;
       console.warn(`[Bot] ⚠️ WARNING: Minecraft server (${config.server.ip}:${config.server.port}) is OFFLINE! Please turn on the server. Continuing reconnect loop...`);

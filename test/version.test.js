@@ -26,7 +26,12 @@ test('supported configured version is passed through unchanged', () => {
 test('unsupported versions do not silently fall back to a different protocol', () => {
   assert.throws(
     () => resolveBotVersion(baseConfig('26.3'), {}, stableVersions),
-    /Minecraft version 26\.3 is not supported/
+    error => {
+      assert.equal(error.code, 'ERR_UNSUPPORTED_MINECRAFT_VERSION');
+      assert.match(error.message, /Minecraft version 26\.3 is not supported/);
+      assert.match(error.message, /client version alone does not translate the server protocol/);
+      return true;
+    }
   );
 });
 
