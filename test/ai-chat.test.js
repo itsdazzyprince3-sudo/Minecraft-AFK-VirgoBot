@@ -27,6 +27,15 @@ test('AI chat command parser accepts slash and chat-prefix forms', () => {
   assert.equal(parseAIChatCommand('hello Virgo'), null);
 });
 
+test('AI chat command parser handles sygget met command forms', () => {
+  assert.deepEqual(parseAIChatCommand('!ai sygget'), { type: 'sygget', text: '' });
+  assert.deepEqual(parseAIChatCommand('/ai sygget'), { type: 'sygget', text: '' });
+  assert.deepEqual(parseAIChatCommand('!ai sygget me'), { type: 'sygget', text: '' });
+  assert.deepEqual(parseAIChatCommand('!ai sygget mine 8 stone'), { type: 'sygget', text: 'mine 8 stone' });
+  assert.deepEqual(parseAIChatCommand('/ai sygget me craft wooden_pickaxe'), { type: 'sygget', text: 'craft wooden_pickaxe' });
+  assert.equal(parseAIChatCommand('sygget mine wood'), null);
+});
+
 test('AI chat authorization matches configured usernames without case sensitivity', () => {
   assert.equal(isAIChatAuthorized('Virgo', ['virgo']), true);
   assert.equal(isAIChatAuthorized(' virgo ', [' Virgo ']), true);

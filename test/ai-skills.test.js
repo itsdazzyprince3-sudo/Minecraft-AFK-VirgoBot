@@ -342,3 +342,21 @@ test('sortChests deposits surplus materials while preserving tools and primary f
   assert.deepEqual(deposited, [{ type: 103, count: 15 }]);
   assert.match(result.message, /15 iron ingot/);
 });
+
+test('locateItem locates items in inventory and memory-indexed chests', async () => {
+  const fakeBot = {
+    username: 'commotozze',
+    entity: { position: new Vec3(0, 64, 0) },
+    inventory: {
+      items: () => [{ name: 'diamond', count: 5 }]
+    }
+  };
+  const agent = { runId: 1, requestedBy: 'virgo' };
+  const memory = {
+    findItemInChests: item => item === 'diamond' ? [{ chest: { x: 10, y: 64, z: 20 }, name: 'diamond', count: 32 }] : []
+  };
+  const skills = new AISkills({ agent, getBot: () => fakeBot, memory, runId: 1 });
+  const res = await skills.locateItem('diamond');
+  assert.match(res.message, /In bot inventory: 5 diamond/);
+  assert.match(res.message, /32x in chest at 10, 64, 20/);
+});
