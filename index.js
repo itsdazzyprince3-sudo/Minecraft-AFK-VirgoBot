@@ -246,6 +246,8 @@ const browserViewer = browserViewerEnabled
       token: process.env.DASHBOARD_TOKEN,
       viewDistance: Number(process.env.VIEWER_DISTANCE) || config.view?.browser?.viewDistance || 6,
       firstPerson: config.view?.browser?.firstPerson !== false,
+      // The C++ eye viewer, shown inside the same page (key V) behind the dashboard token.
+      eyesUrl: viewEnabled ? (process.env.VIEWER_URL || viewConfig.url || `http://127.0.0.1:${Number(process.env.VIEW_HTTP_PORT) || viewConfig.httpPort || 8080}`) : null,
       controls: {
         busy: () => ['working', 'paused'].includes(aiAgent.getStatus().status),
         input: (input, pressed) => manualControlSession.set(input, pressed),

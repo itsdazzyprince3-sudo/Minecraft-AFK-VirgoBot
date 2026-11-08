@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { Vec3 } = require('vec3');
 const { BrowserViewer, secretsMatch, readCookie } = require('../lib/browser-viewer');
 
 test('secretsMatch only accepts an identical non-empty secret', () => {
@@ -45,7 +46,7 @@ test('hudState reports health, hunger, XP, hotbar, facing and chat for the overl
     version: '1.21.4',
     health: 14, food: 15, quickBarSlot: 2,
     experience: { level: 7, progress: 0.6 },
-    entity: { position: { x: 1, y: 64, z: -3 }, yaw: Math.PI, effects: {} },
+    entity: { position: new Vec3(1, 64, -3), yaw: Math.PI, effects: {} },
     game: { dimension: 'overworld', gameMode: 'survival' },
     time: { timeOfDay: 6000 },
     inventory: { slots },
@@ -60,7 +61,7 @@ test('hudState reports health, hunger, XP, hotbar, facing and chat for the overl
   assert.equal(state.food, 15);
   assert.equal(state.slot, 2);
   assert.equal(state.xpLevel, 7);
-  assert.equal(state.facing, 'north');
+  assert.equal(state.facing, 'south');   // mineflayer: yaw pi looks +Z
   assert.deepEqual(state.hotbar[0], { name: 'diamond_pickaxe', count: 1 });
   assert.equal(state.hotbar[1], null);
   assert.equal(state.hotbar[2].count, 64);
