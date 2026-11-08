@@ -60,9 +60,12 @@ and `!ai stop`. Autonomous grinding remains off until explicitly enabled.
 
 ### Real Minecraft window capture and desktop play (Linux/X11)
 
-The optional `screenCapture` mode captures the actual pixels of a visible
-Minecraft Java window with FFmpeg/X11 and shows refreshed frames in the
-token-protected dashboard POV panel. It is separate from the reconstructed
+In the sample configuration both `screenCapture.enabled` and
+`screenCapture.controlWindow` are `false` on purpose: capture depends on the
+machine's desktop, and automatic keyboard/mouse control should never start
+without the user opting in. The optional `screenCapture` mode captures the
+actual pixels of a visible Minecraft Java window with FFmpeg/X11 and shows
+refreshed frames in the token-protected dashboard POV panel. It is separate from the reconstructed
 Mineflayer viewer. On the same logged-in Linux desktop session, install
 `ffmpeg` and `xdotool`, start Minecraft, then set `screenCapture.enabled` to
 `true` and `screenCapture.windowTitle` to the visible window title (usually
@@ -327,9 +330,25 @@ networks.
 
 ### Step 2 - Configure the bot
 
-Copy `settings.example.json` to `settings.json`, keep `settings.json` private,
-and fill in the required fields. The runtime intentionally reads
-`settings.json`, which is ignored by Git.
+The repository contains `settings.example.json`, not your personal
+`settings.json`. Create your private runtime file, then edit it in Nano:
+
+```sh
+cp settings.example.json settings.json
+nano settings.json
+```
+
+`settings.json` is intentionally ignored by Git, so it is not uploaded to
+GitHub. In Nano, use **Ctrl+W** to find a setting, edit only the value, then
+save with **Ctrl+O**, press **Enter**, and exit with **Ctrl+X**. Restart the bot
+after changing settings. JSON does not allow comments: keep the double quotes
+and commas, write booleans exactly as `true` or `false` (not quoted), and do not
+leave a trailing comma.
+
+Required edits are the server address/port and bot username. In
+`ai.allowedUsers`, replace `YOUR_MINECRAFT_USERNAME` with your own Minecraft
+username to allow your account to use AI chat. The sample already enables AI
+chat for that allowlist and keeps untrusted players unauthorized.
 
 ```json
 "bot-account": {
@@ -791,29 +810,39 @@ restrictions.
 
 ## settings.json Reference
 
-| Key | What it does |
-|-----|-------------|
-| bot-account.username | The bot's Minecraft username |
-| bot-account.type | Set to "offline" for cracked servers |
-| server.ip | Your server's IP address |
-| server.port | Your server's port (default 25565) |
-| server.loader | Optional server implementation label, such as "fabric"; informational only |
-| server.version | Exact Minecraft server version; unsupported protocols are rejected |
-| server.proxy-version-fallback | Optional fallback for an unsupported target version |
-| utils.auto-auth.enabled | Turn on if the server uses AuthMe or similar |
-| utils.chat-messages.repeat-delay | Seconds between periodic chat messages |
-| movement.circle-walk.enabled | Repeats a patrol around the position where the bot spawned |
-| movement.circle-walk.radius | Maximum patrol distance from the spawn position, in blocks |
-| movement.circle-walk.speed | Pause in milliseconds between patrol waypoints |
-| modules.combat | Bot attacks nearby mobs |
-| modules.avoidMobs | Bot runs from mobs (turn off if combat is on) |
-| ai.enabled | Enable instruction-driven AI mode instead of AFK modules |
-| ai.autonomous.enabled | Opt in to bounded nearby gathering cycles |
-| ai.model | Default Gemini model (`gemini-3.5-flash-lite`, overridden by AI_MODEL) |
-| ai.apiUrl | Default Gemini Interactions endpoint (overridden by AI_API_URL) |
-| discord.enabled | Send connect/disconnect events to Discord |
-| discord.webhookUrl | Your Discord webhook URL |
-| chat.tpWhitelist | Usernames allowed to use the !tp command |
+Use **Ctrl+W** in Nano to search for one of these keys. The defaults below are
+from `settings.example.json`:
+
+| Key | Default | What changing it does |
+|-----|---------|-----------------------|
+| `ai.enabled` | `true` | Enables instruction-driven AI behavior. Leave on for natural AI chat and task commands. |
+| `ai.allowedUsers` | placeholder username | Replace `YOUR_MINECRAFT_USERNAME` with your own name; only trusted users can use AI chat. |
+| `ai.respondToTrustedChat` | `true` | Lets the AI answer ordinary messages from the allowlist; outsiders remain unauthorized. |
+| `ai.autonomous.enabled` | `false` | Turns on periodic autonomous gathering. Keep off unless you want the bot to choose tasks by itself. |
+| `utils.auto-reconnect` | `true` | Reconnects after the server or network drops. Usually leave on. |
+| `utils.auto-auth.enabled` | `false` | Use only if your server has an AuthMe-like login plugin; its password is private. |
+| `movement.circle-walk.enabled` | `true` | Patrols around the bot's spawn position when the AFK movement module is active. |
+| `modules.combat` | `true` | Allows the AFK module to attack nearby mobs. |
+| `modules.avoidMobs` | `true` | Runs only when `modules.combat` is `false`; with the sample's combat setting, this avoidance module is skipped. |
+| `view.enabled` | `false` | Starts the optional reconstructed world viewer; it is not a real desktop capture. |
+| `screenCapture.enabled` | `false` | Captures the actual Minecraft window on Linux/X11 and displays it in the protected dashboard. Requires FFmpeg, xdotool, and a visible client window. |
+| `screenCapture.controlWindow` | `false` | With capture enabled, lets vision AI send keyboard/mouse input to that window. It focuses the game window and skips the Mineflayer login; only enable deliberately. |
+| `vision.llm` | `false` | Runs the slower vision-model action loop for the reconstructed viewer. Desktop-control mode turns it on automatically. |
+| `discord.enabled` | `false` | Sends configured events to Discord; keep the webhook URL private. |
+
+For **real-screen streaming only**, set `screenCapture.enabled` to `true` and
+leave `screenCapture.controlWindow` as `false`. For **AI play on that client**,
+set both to `true`; see the Linux/X11 requirements and focus warning above.
+
+Set the required server IP/port and bot username, and replace the AI allowlist
+placeholder with your Minecraft username. After those required edits, do not
+change `bot-account.type`, `server.loader`, `server.version`,
+`server.proxy-version-fallback`, model names, or API URLs just to “try” values:
+they control authentication/protocol/provider compatibility and arbitrary
+changes can stop the bot connecting or the model responding. In particular,
+do not guess a Minecraft version; use one supported by the installed
+Mineflayer protocol, or ask for help first. Never commit or share
+`settings.json`, passwords, API keys, dashboard tokens, or Discord webhooks.
 
 ---
 
