@@ -341,13 +341,13 @@ app.get('/', (req, res) => {
             <div class="label">3D view (bot's eyes)</div>
             <p class="control-help">Enter the dashboard token below, then open the live first-person view. Use the controls under it to move the bot.</p>
             <button class="control-key" type="button" id="open-3d-view">Open 3D view</button>
-            <iframe id="view-3d" title="Bot 3D view" style="display:none;width:100%;height:360px;border:0;border-radius:8px;margin-top:8px;background:#000"></iframe>
+            <iframe id="view-3d" title="Bot 3D view" style="display:none;width:100%;aspect-ratio:16/9;height:auto;border:0;border-radius:8px;margin-top:8px;background:#000"></iframe>
             <script>
               document.getElementById('open-3d-view').addEventListener('click', function () {
                 var token = document.getElementById('dashboard-token').value;
                 if (!token) { alert('Enter the dashboard token first.'); return; }
                 var frame = document.getElementById('view-3d');
-                frame.src = location.protocol + '//' + location.hostname + ':${browserViewerPort}/?token=' + encodeURIComponent(token);
+                frame.src = location.protocol + '//' + location.hostname + ':${browserViewerPort}/watch?token=' + encodeURIComponent(token);
                 frame.style.display = 'block';
               });
             </script>

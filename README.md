@@ -43,13 +43,17 @@ large model planning every step.
 Start the bot with `BOT_VIEWER=1` (or set `view.browser.enabled` to `true` in
 `settings.json`) and a `DASHBOARD_TOKEN`. The dashboard then shows a **3D view**
 card: enter the token, press **Open 3D view**, and a first-person view of the bot's
-world appears next to the movement controls. It uses `prismarine-viewer` and the
+world appears next to the movement controls, with a Minecraft-style HUD drawn on top
+(hearts, hunger, XP, hotbar with item icons, crosshair, coordinates and recent chat).
+The HUD uses the game's own sprites and font; the standalone page is at
+`http://127.0.0.1:3007/watch?token=...`. It uses `prismarine-viewer` and the
 native `canvas` package, both optional; install them with
 `npm install prismarine-viewer canvas` if `npm install` skipped them.
 
 The view runs on port `3007` (`VIEWER_PORT`), binds to `127.0.0.1` unless `HOST` or
 `VIEWER_HOST` is set, and requires the dashboard token. It shows a render of the
-chunks the bot has loaded, not the official game client. To use it on a phone or
+chunks the bot has loaded plus that HUD, not the official game client (no inventory screens or
+entity models; for the exact game screen see `real-client/`). To use it on a phone or
 another computer, run the bot on that device or open the port through your own
 tunnel, and keep `DASHBOARD_TOKEN` secret.
 
