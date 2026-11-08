@@ -36,6 +36,8 @@ settings. The bundled small model is useful for short conversation; deterministi
 Minecraft skills handle most actions directly so gameplay does not depend on a
 large model planning every step.
 
+> **Want the exact game screen and a real player?** See [`real-client/`](real-client/README.md): the real Minecraft client with Baritone, watched in your browser.
+
 ### Live 3D view (see what the bot sees)
 
 Start the bot with `BOT_VIEWER=1` (or set `view.browser.enabled` to `true` in
