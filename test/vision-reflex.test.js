@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { reflexAction, ACTIONS } = require('../lib/vision-controller');
+const { VisionController, reflexAction, ACTIONS } = require('../lib/vision-controller');
 
 function perception(overrides = {}) {
   return {
@@ -58,4 +58,43 @@ test('reflex output stays inside the known action set', () => {
   for (const sample of samples) {
     assert.ok(ACTIONS.includes(reflexAction(sample)));
   }
+});
+
+test('vision can use a real-client JPEG frame without the reconstructed renderer', async () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0x01, 0x02, 0xff, 0xd9]);
+  const controller = new VisionController({ getJpegFrame: async () => jpeg, enabled: true });
+  const frame = await controller.captureFrame();
+  assert.equal(frame.format, 'jpeg');
+  assert.deepEqual(frame.jpeg, jpeg);
+  assert.equal(controller.screenMode, true);
+});
+
+test('vision dispatches actions through the selected desktop controller', async () => {
+  const actions = [];
+  const controller = new VisionController({
+    executeAction: async action => actions.push(action),
+    enabled: true
+  });
+  controller.applyAction('forward');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(actions, ['forward']);
+});
+
+test('desktop vision tick sends the exact captured JPEG to its model and applies the returned action', async () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0x10, 0x20, 0xff, 0xd9]);
+  const actions = [];
+  const controller = new VisionController({
+    getJpegFrame: async () => jpeg,
+    executeAction: async action => actions.push(action),
+    isConnected: () => true,
+    enabled: true
+  });
+  controller.askModel = async imageBase64 => {
+    assert.deepEqual(Buffer.from(imageBase64, 'base64'), jpeg);
+    return 'ACTION: jump - hop over the block';
+  };
+  await controller.tick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(actions, ['jump']);
+  assert.equal(controller.ticks, 1);
 });

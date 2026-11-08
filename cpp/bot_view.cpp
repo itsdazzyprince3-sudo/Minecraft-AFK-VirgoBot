@@ -13,7 +13,9 @@
 //                       [--http-port 8080] [--w 320] [--h 180] [--threads N]
 //                       [--fps 120] [--stream-fps 30] [--quality 70]
 //                       [--mock] [--bench 5] [--selftest]
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -23,6 +25,7 @@
 #include <string>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include <atomic>
 #include <chrono>
 #include <algorithm>
@@ -52,6 +55,7 @@ static float YAW_SIGN = 1.0f, PITCH_SIGN = 1.0f;
 static std::string FRAME_HOST = "127.0.0.1";
 static int FRAME_PORT = 31337;
 static int HTTP_PORT = 8080;
+static std::string HTTP_HOST = "127.0.0.1";
 static bool MOCK = false;
 static float MAX_DIST = 48.0f;
 
@@ -792,12 +796,14 @@ static void httpServer() {
   if (srv<0) return;
   int one=1; setsockopt(srv,SOL_SOCKET,SO_REUSEADDR,&one,sizeof(one));
   sockaddr_in addr{}; addr.sin_family=AF_INET; addr.sin_port=htons(HTTP_PORT);
-  addr.sin_addr.s_addr=htonl(INADDR_ANY);
+  if (inet_pton(AF_INET,HTTP_HOST.c_str(),&addr.sin_addr)!=1) {
+    fprintf(stderr,"[View] invalid HTTP bind address: %s\n",HTTP_HOST.c_str()); close(srv); return;
+  }
   if (bind(srv,(sockaddr*)&addr,sizeof(addr))!=0) {
     fprintf(stderr,"[View] bind %d failed: %s\n",HTTP_PORT,strerror(errno)); return;
   }
   listen(srv,16);
-  printf("[View] HTTP viewer on http://0.0.0.0:%d/ (mock=%d)\n", HTTP_PORT, MOCK?1:0);
+  printf("[View] HTTP viewer on http://%s:%d/ (mock=%d)\n", HTTP_HOST.c_str(), HTTP_PORT, MOCK?1:0);
   fflush(stdout);
   while (g_running.load()) {
     int c=accept(srv,nullptr,nullptr);
@@ -848,6 +854,31 @@ static void httpServer() {
           p.target_kind,p.target_sx,p.target_sy,p.target_dist,
           g_last_packet_ms.load()? now_ms()-g_last_packet_ms.load():-1);
         httpReply(c,200,"text/plain",(const uint8_t*)js,(size_t)n);
+      } else if (!strcmp(path,"/state.json")) {
+        Perc p; { std::lock_guard<std::mutex> lk(g_perc_mtx); p=g_perc; }
+        Pose pose; { std::lock_guard<std::mutex> lk(g_pose_mtx); pose=g_render_pose; }
+        World world; { std::lock_guard<std::mutex> lk(g_world_mtx); world=g_world; }
+        char js[1200];
+        int n=snprintf(js,sizeof(js),
+          "{\"fps\":%d,\"cells\":%lld,\"entities\":%zu,"
+          "\"eye\":[%.3f,%.3f,%.3f],\"yaw\":%.6f,\"pitch\":%.6f,"
+          "\"world\":[%d,%d,%d],\"free\":{\"center\":%u,\"left\":%u,\"right\":%u},"
+          "\"groundPct\":%u,\"skyPct\":%u,\"forwardClear\":%.3f,\"nearestObstacle\":%.3f,"
+          "\"target\":{\"kind\":%u,\"screenX\":%d,\"screenY\":%d,\"distance\":%u},"
+          "\"haveWorld\":%s,\"haveFrame\":%s,\"packetAgeMs\":%lld}",
+          g_fps.load(),g_cells.load(),pose.ents.size(),
+          pose.eye[0],pose.eye[1],pose.eye[2],pose.yaw,pose.pitch,
+          world.W,world.H,world.D,
+          (unsigned)p.free_center,(unsigned)p.free_left,(unsigned)p.free_right,
+          (unsigned)p.ground_pct,(unsigned)p.sky_pct,p.forward_clear,p.nearest,
+          (unsigned)p.target_kind,(int)p.target_sx,(int)p.target_sy,(unsigned)p.target_dist,
+          p.have_world?"true":"false",p.have_frame?"true":"false",
+          g_last_packet_ms.load()? now_ms()-g_last_packet_ms.load():-1LL);
+        if (n<0 || (size_t)n>=sizeof(js)) {
+          httpReply(c,500,"text/plain",(const uint8_t*)"state too large",15);
+        } else {
+          httpReply(c,200,"application/json; charset=utf-8",(const uint8_t*)js,(size_t)n);
+        }
       } else {
         httpReply(c,404,"text/plain",(const uint8_t*)"404",3);
       }
@@ -915,6 +946,7 @@ int main(int argc,char**argv){
     else if (a=="--frame-host"&&i+1<argc) FRAME_HOST=argv[++i];
     else if (a=="--frame-port"&&i+1<argc) FRAME_PORT=atoi(argv[++i]);
     else if (a=="--http-port"&&i+1<argc) HTTP_PORT=atoi(argv[++i]);
+    else if (a=="--http-host"&&i+1<argc) HTTP_HOST=argv[++i];
     else if (a=="--w"&&i+1<argc) RES_W=atoi(argv[++i]);
     else if (a=="--h"&&i+1<argc) RES_H=atoi(argv[++i]);
     else if (a=="--threads"&&i+1<argc) THREADS=atoi(argv[++i]);
@@ -941,8 +973,8 @@ int main(int argc,char**argv){
   if (doSelf) return selftest();
   if (doBench) { bench(benchSec); return 0; }
 
-  printf("[View] bot_view v2 res=%dx%d fps=%d stream=%d threads=%d frame=%s:%d http=%d mock=%d\n",
-         RES_W,RES_H,RENDER_FPS,STREAM_FPS,THREADS,FRAME_HOST.c_str(),FRAME_PORT,HTTP_PORT,MOCK?1:0);
+  printf("[View] bot_view v2 res=%dx%d fps=%d stream=%d threads=%d frame=%s:%d http=%s:%d mock=%d\n",
+         RES_W,RES_H,RENDER_FPS,STREAM_FPS,THREADS,FRAME_HOST.c_str(),FRAME_PORT,HTTP_HOST.c_str(),HTTP_PORT,MOCK?1:0);
   fflush(stdout);
   std::thread(httpServer).detach();
   std::thread(encoderLoop).detach();

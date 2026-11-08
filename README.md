@@ -27,14 +27,18 @@ the on-screen buttons to move; Space jumps, Shift sneaks, and Ctrl sprints.
 Manual input pauses the patrol until all controls are released. Held inputs
 automatically release if the dashboard stops sending its control heartbeat.
 
-AI and dashboard secrets belong in the ignored `.env` file. Local play works
-without a cloud API key: install Ollama, pull the model configured under
-`ai.ollama`, and set `ai.provider` to `auto` or `local`. With `auto`, the bot
-uses Ollama when `AI_API_KEY` is absent and uses the configured cloud provider
-when a key is present. Set `OLLAMA_URL` or `OLLAMA_MODEL` to override the local
-settings. The bundled small model is useful for short conversation; deterministic
-Minecraft skills handle most actions directly so gameplay does not depend on a
-large model planning every step.
+AI and dashboard secrets belong in the ignored `.env` file. A language model is
+required for genuine open-ended conversation and flexible reasoning; without
+one, the bot can still run its deterministic Minecraft skills but its fallback
+conversation is limited. For a local setup, install Ollama on the same machine
+as the bot, run `ollama pull qwen2.5:1.5b`, and keep `ai.provider` set to `auto`
+or `local`. With `auto`, the bot uses Ollama when no cloud API key is present and
+uses the configured cloud provider when a key is present. Set `OLLAMA_URL` or
+`OLLAMA_MODEL` to override the local settings. If the bot is hosted remotely,
+`127.0.0.1` means the bot host—not your PC—so run a model endpoint where the bot
+can reach it or configure a supported cloud provider. Deterministic Minecraft
+skills handle actions and verify game state, so gameplay does not depend on the
+language model inventing or directly executing game commands.
 
 > **Want the exact game screen and a real player?** See [`real-client/`](real-client/README.md): the real Minecraft client with Baritone, watched in your browser.
 
@@ -71,13 +75,47 @@ tunnel, and keep `DASHBOARD_TOKEN` secret.
 
 ### AI chat and survival behavior
 
-Enable `ai.enabled` in your private `settings.json`, then add trusted Minecraft
-usernames to `ai.allowedUsers` or `chat.tpWhitelist`. The bot combines both
-lists. Restart the active process after editing settings. Startup logs show the
-trusted names. Usernames are matched without case sensitivity. Use `!ai help`
-for commands. Examples: `!ai hello`, `!ai come`, `!ai follow me`, `!ai mine 8
-stone`, `!ai craft wooden_pickaxe`, `!ai grind wood`, `!ai status`, `!ai teach
-keep three logs`, and `!ai stop`.
+Copy `settings.example.json` to the ignored `settings.json`, enter your server
+details, and replace `YOUR_MINECRAFT_USERNAME` under `ai.allowedUsers` with your
+Minecraft account name. The example enables AI and replies to ordinary chat
+from allowlisted players; strangers remain unauthorized. The bot combines
+`ai.allowedUsers` and `chat.tpWhitelist`. Usernames are case-insensitive. Make
+sure an Ollama or cloud model is reachable as described above for natural
+conversation. Restart the bot after editing settings.
+
+You can talk naturally (for example, `Virgo, what should I do before night?`) or
+ask it to act (`Virgo, gather wood and make a stone pickaxe`). The AI can answer
+questions, inspect the live game state, build a multi-step plan, call its
+Minecraft skills, and verify the result. Use `!ai help` for the full command
+list. Examples: `!ai come`, `!ai follow me`, `!ai mine 8 stone`, `!ai craft
+wooden_pickaxe`, `!ai grind wood`, `!ai status`, `!ai teach keep three logs`,
+and `!ai stop`. Autonomous grinding remains off until explicitly enabled.
+
+### Real Minecraft window capture and desktop play (Linux/X11)
+
+In the sample configuration both `screenCapture.enabled` and
+`screenCapture.controlWindow` are `false` on purpose: capture depends on the
+machine's desktop, and automatic keyboard/mouse control should never start
+without the user opting in. The optional `screenCapture` mode captures the
+actual pixels of a visible Minecraft Java window with FFmpeg/X11 and shows
+refreshed frames in the token-protected dashboard POV panel. It is separate from the reconstructed
+Mineflayer viewer. On the same logged-in Linux desktop session, install
+`ffmpeg` and `xdotool`, start Minecraft, then set `screenCapture.enabled` to
+`true` and `screenCapture.windowTitle` to the visible window title (usually
+`Minecraft`). Start the bot from a terminal in that desktop session so
+`DISPLAY` and X11 permissions are available. The capture backend currently
+requires X11; native Wayland capture is not supported.
+
+To have the visual AI also play that real window, set
+`screenCapture.controlWindow` to `true`, install/run Ollama on the same machine
+and pull a vision model (for example, `ollama pull llava`). Desktop-control mode
+automatically enables the vision action loop and **does not log a second
+Mineflayer player into the server**. The existing Minecraft client must already
+be logged in and in the world. AI actions briefly send keyboard/mouse input to
+that window and bring it to the foreground, so do not use the PC at the same
+time; test first in a disposable world. Keep `controlWindow: false` to stream
+the real window without allowing the AI to control it. Configure a strong
+`DASHBOARD_TOKEN`; remote POV access is protected by it.
 
 The bot also builds a skill catalog from the installed Minecraft data: mining,
 crafting, smelting, equipping, hunting, breeding, and delivery entries for every
@@ -136,9 +174,17 @@ default and it should only be enabled for trusted players.
 Virgo can inspect nearby blocks, entities, players, position, health, food, and
 inventory; navigate to visible players; gather resources; craft and smelt items;
 eat, farm, build a basic shelter, sleep, explore, and store or deliver items.
-It reasons from this structured game state and does not capture or render a
-first-person screen. It fights nearby hostile mobs when instructed or while
-surviving, retreats from creepers and low health, and does not attack players.
+It reasons primarily from structured game state. With `view.enabled` it also
+receives a software-rendered first-person reconstruction (real 26.x block
+textures when the local asset pack has been built, flat colors otherwise), and
+its reflex layer plays from that renderer's perception feed. The dashboard can
+show this reconstructed POV through token-protected `/api/view/*` proxy routes
+with F3-style telemetry: coordinates, facing, yaw/pitch, dimension, time,
+health/food, block/sky light, biome, renderer FPS, and perception clearance.
+This is not a capture of a real Minecraft client screen, and renderer FPS is
+not a Minecraft client FPS. It fights nearby hostile mobs when instructed or
+while surviving, retreats from creepers and low health, and does not attack
+players.
 Sleep is attempted only at night with a nearby or carried bed and no detected
 nearby hostile. Colored bed items are recognized. Death location and dimension
 are saved for recovery; recovery is refused across dimensions. Ordinary
@@ -317,9 +363,25 @@ networks.
 
 ### Step 2 - Configure the bot
 
-Copy `settings.example.json` to `settings.json`, keep `settings.json` private,
-and fill in the required fields. The runtime intentionally reads
-`settings.json`, which is ignored by Git.
+The repository contains `settings.example.json`, not your personal
+`settings.json`. Create your private runtime file, then edit it in Nano:
+
+```sh
+cp settings.example.json settings.json
+nano settings.json
+```
+
+`settings.json` is intentionally ignored by Git, so it is not uploaded to
+GitHub. In Nano, use **Ctrl+W** to find a setting, edit only the value, then
+save with **Ctrl+O**, press **Enter**, and exit with **Ctrl+X**. Restart the bot
+after changing settings. JSON does not allow comments: keep the double quotes
+and commas, write booleans exactly as `true` or `false` (not quoted), and do not
+leave a trailing comma.
+
+Required edits are the server address/port and bot username. In
+`ai.allowedUsers`, replace `YOUR_MINECRAFT_USERNAME` with your own Minecraft
+username to allow your account to use AI chat. The sample already enables AI
+chat for that allowlist and keeps untrusted players unauthorized.
 
 ```json
 "bot-account": {
@@ -423,6 +485,45 @@ The bot runs on Node.js and uses the same `npm start` command on each platform.
 Node.js 22 or newer is required; use a current Node.js LTS release when possible.
 Run the commands from the repository folder. Keep `settings.json` private.
 
+### Quick install (Linux/macOS Bash)
+
+The installer clones this repository into `~/Minecraft-AFK-VirgoBot`, installs
+the locked npm dependencies, and creates a private `settings.json` from the
+example. It does not start the bot. Review the installer in the repository
+before running it, then use:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/itsdazzyprince3-sudo/Minecraft-AFK-VirgoBot/main/install.sh | bash
+cd ~/Minecraft-AFK-VirgoBot
+nano settings.json
+npm start
+```
+
+To choose another install folder, set `MINECRAFT_AFK_BOT_DIR` before the curl
+command. The directory must not already exist. This script requires Git, npm,
+and Node.js 22 or newer; Termux users should follow the Termux instructions
+below instead.
+
+### Install from source with npm
+
+There is currently **no package published to the npm registry**, so
+`npm install @Minecraft-AFK-VirgoBot` is not a valid installation command
+(scoped npm packages also require the form `@scope/package`). To install with
+npm, clone the source repository and install its dependencies:
+
+```sh
+git clone https://github.com/itsdazzyprince3-sudo/Minecraft-AFK-VirgoBot.git
+cd Minecraft-AFK-VirgoBot
+npm install
+cp settings.example.json settings.json
+nano settings.json
+npm start
+```
+
+Use `npm ci` instead of `npm install` when you want the exact dependency
+versions from the committed lockfile, as the platform-specific instructions
+below do.
+
 ### Termux (Android)
 
 In the Termux app (install Termux from F-Droid or its official GitHub releases):
@@ -430,8 +531,8 @@ In the Termux app (install Termux from F-Droid or its official GitHub releases):
 ```sh
 pkg update
 pkg install nodejs-lts git
-git clone https://github.com/itsdazzyprince3-sudo/Aternos24-7-HostingBot.git
-cd Aternos24-7-HostingBot
+git clone https://github.com/itsdazzyprince3-sudo/Minecraft-AFK-VirgoBot.git
+cd Minecraft-AFK-VirgoBot
 cp settings.example.json settings.json
 nano settings.json
 npm ci
@@ -461,8 +562,8 @@ least 22 before installing the bot:
 ```sh
 apt update
 apt install -y git nodejs npm
-git clone https://github.com/itsdazzyprince3-sudo/Aternos24-7-HostingBot.git
-cd Aternos24-7-HostingBot
+git clone https://github.com/itsdazzyprince3-sudo/Minecraft-AFK-VirgoBot.git
+cd Minecraft-AFK-VirgoBot
 cp settings.example.json settings.json
 nano settings.json
 npm ci
@@ -783,29 +884,39 @@ restrictions.
 
 ## settings.json Reference
 
-| Key | What it does |
-|-----|-------------|
-| bot-account.username | The bot's Minecraft username |
-| bot-account.type | Set to "offline" for cracked servers |
-| server.ip | Your server's IP address |
-| server.port | Your server's port (default 25565) |
-| server.loader | Optional server implementation label, such as "fabric"; informational only |
-| server.version | Exact Minecraft server version; unsupported protocols are rejected |
-| server.proxy-version-fallback | Optional fallback for an unsupported target version |
-| utils.auto-auth.enabled | Turn on if the server uses AuthMe or similar |
-| utils.chat-messages.repeat-delay | Seconds between periodic chat messages |
-| movement.circle-walk.enabled | Repeats a patrol around the position where the bot spawned |
-| movement.circle-walk.radius | Maximum patrol distance from the spawn position, in blocks |
-| movement.circle-walk.speed | Pause in milliseconds between patrol waypoints |
-| modules.combat | Bot attacks nearby mobs |
-| modules.avoidMobs | Bot runs from mobs (turn off if combat is on) |
-| ai.enabled | Enable instruction-driven AI mode instead of AFK modules |
-| ai.autonomous.enabled | Opt in to bounded nearby gathering cycles |
-| ai.model | Default Gemini model (`gemini-3.5-flash-lite`, overridden by AI_MODEL) |
-| ai.apiUrl | Default Gemini Interactions endpoint (overridden by AI_API_URL) |
-| discord.enabled | Send connect/disconnect events to Discord |
-| discord.webhookUrl | Your Discord webhook URL |
-| chat.tpWhitelist | Usernames allowed to use the !tp command |
+Use **Ctrl+W** in Nano to search for one of these keys. The defaults below are
+from `settings.example.json`:
+
+| Key | Default | What changing it does |
+|-----|---------|-----------------------|
+| `ai.enabled` | `true` | Enables instruction-driven AI behavior. Leave on for natural AI chat and task commands. |
+| `ai.allowedUsers` | placeholder username | Replace `YOUR_MINECRAFT_USERNAME` with your own name; only trusted users can use AI chat. |
+| `ai.respondToTrustedChat` | `true` | Lets the AI answer ordinary messages from the allowlist; outsiders remain unauthorized. |
+| `ai.autonomous.enabled` | `false` | Turns on periodic autonomous gathering. Keep off unless you want the bot to choose tasks by itself. |
+| `utils.auto-reconnect` | `true` | Reconnects after the server or network drops. Usually leave on. |
+| `utils.auto-auth.enabled` | `false` | Use only if your server has an AuthMe-like login plugin; its password is private. |
+| `movement.circle-walk.enabled` | `true` | Patrols around the bot's spawn position when the AFK movement module is active. |
+| `modules.combat` | `true` | Allows the AFK module to attack nearby mobs. |
+| `modules.avoidMobs` | `true` | Runs only when `modules.combat` is `false`; with the sample's combat setting, this avoidance module is skipped. |
+| `view.enabled` | `false` | Starts the optional reconstructed world viewer; it is not a real desktop capture. |
+| `screenCapture.enabled` | `false` | Captures the actual Minecraft window on Linux/X11 and displays it in the protected dashboard. Requires FFmpeg, xdotool, and a visible client window. |
+| `screenCapture.controlWindow` | `false` | With capture enabled, lets vision AI send keyboard/mouse input to that window. It focuses the game window and skips the Mineflayer login; only enable deliberately. |
+| `vision.llm` | `false` | Runs the slower vision-model action loop for the reconstructed viewer. Desktop-control mode turns it on automatically. |
+| `discord.enabled` | `false` | Sends configured events to Discord; keep the webhook URL private. |
+
+For **real-screen streaming only**, set `screenCapture.enabled` to `true` and
+leave `screenCapture.controlWindow` as `false`. For **AI play on that client**,
+set both to `true`; see the Linux/X11 requirements and focus warning above.
+
+Set the required server IP/port and bot username, and replace the AI allowlist
+placeholder with your Minecraft username. After those required edits, do not
+change `bot-account.type`, `server.loader`, `server.version`,
+`server.proxy-version-fallback`, model names, or API URLs just to “try” values:
+they control authentication/protocol/provider compatibility and arbitrary
+changes can stop the bot connecting or the model responding. In particular,
+do not guess a Minecraft version; use one supported by the installed
+Mineflayer protocol, or ask for help first. Never commit or share
+`settings.json`, passwords, API keys, dashboard tokens, or Discord webhooks.
 
 ---
 
