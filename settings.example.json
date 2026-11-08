@@ -63,7 +63,7 @@
     "combat": true,
     "beds": false,
     "chat": true,
-    "console-commands": false
+    "console-commands": true
   },
   "ai": {
     "enabled": false,
@@ -140,5 +140,30 @@
     "tpWhitelist": [
       "Virgo"
     ]
+  },
+  "view": {
+    "enabled": false,
+    "spawn": true,
+    "binary": "cpp/bot_view",
+    "httpPort": 8080,
+    "renderWidth": 320,
+    "renderHeight": 180,
+    "renderFps": 60,
+    "streamFps": 30,
+    "quality": 70,
+    "w": 64,
+    "h": 48,
+    "d": 64,
+    "tickHz": 20,
+    "threads": 8
+  },
+  "vision": {
+    "enabled": false,
+    "reflex": true,
+    "reflexHz": 10,
+    "llm": false,
+    "model": "llava",
+    "intervalMs": 4000,
+    "dryRun": false
   }
 }

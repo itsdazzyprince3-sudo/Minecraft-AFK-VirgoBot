@@ -3,6 +3,7 @@
 require('./lib/protocol-compat');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const mineflayer = require('mineflayer');
 const { Movements, pathfinder, goals } = require('mineflayer-pathfinder');
 const { GoalBlock, GoalNearXZ } = goals;
@@ -21,7 +22,6 @@ const { installProtocolPacketCompatibility } = require('./lib/protocol-packet-co
 const pluginLoader = require('./lib/plugin-loader');
 const { FrameServer } = require('./lib/frame-server');
 const { VisionController } = require('./lib/vision-controller');
-const { BrowserViewer } = require('./lib/browser-viewer');
 const settingsPath = require('node:path').join(__dirname, 'settings.json');
 if (!fs.existsSync(settingsPath)) {
   throw new Error('Missing settings.json. Copy settings.example.json to settings.json and configure your server before starting the bot.');
@@ -35,9 +35,6 @@ const { resolveBotVersion } = require('./lib/version');
 const app = express();
 app.use(express.json({ limit: '8kb' }));
 const PORT = process.env.PORT || 5000;
-// Bind to loopback unless HOST is set. Hosting platforms that inject PORT (Render, Replit, etc.)
-// need an external interface, so default to 0.0.0.0 only when PORT is provided by the environment.
-const HOST = process.env.HOST || (process.env.PORT ? '0.0.0.0' : '127.0.0.1');
 
 let bot = null;
 let activeIntervals = [];
@@ -69,15 +66,54 @@ const manualControlSession = new ManualControlSession({
 });
 const manualControls = manualControlSession.active;
 
+const chatQueue = [];
+let isProcessingChatQueue = false;
+let lastChatSentAt = 0;
+const MIN_CHAT_INTERVAL_MS = 1200;
+
+function enqueueSafeChat(message, rawSender) {
+  if (!message) return;
+  chatQueue.push({ message, rawSender });
+  processChatQueue();
+}
+
+function processChatQueue() {
+  if (isProcessingChatQueue || !chatQueue.length || !bot || !botState.connected) return;
+  const now = Date.now();
+  const wait = Math.max(0, MIN_CHAT_INTERVAL_MS - (now - lastChatSentAt));
+  isProcessingChatQueue = true;
+  setTimeout(() => {
+    isProcessingChatQueue = false;
+    if (!bot || !botState.connected) {
+      chatQueue.length = 0;
+      return;
+    }
+    const item = chatQueue.shift();
+    if (item && item.message) {
+      lastChatSentAt = Date.now();
+      try {
+        if (typeof item.rawSender === 'function') {
+          item.rawSender(item.message);
+        } else if (typeof bot?._rawChat === 'function') {
+          bot._rawChat(item.message);
+        } else if (typeof bot?.chat === 'function') {
+          bot.chat(item.message);
+        }
+      } catch (err) {
+        console.log(`[ChatQueue] Could not send: ${err.message}`);
+      }
+    }
+    if (chatQueue.length > 0) {
+      processChatQueue();
+    }
+  }, wait);
+}
+
 function sendAIChatMessage(message) {
   if (!bot || !botState.connected) return;
   const text = String(message).replace(/[\r\n\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200);
   if (!text) return;
-  try {
-    bot.chat(`[${bot.username || 'Virgo'}] ${text}`);
-  } catch (error) {
-    console.log(`[AI Chat] Could not send response: ${error.message}`);
-  }
+  enqueueSafeChat(`[${bot.username || 'Virgo'}] ${text}`);
 }
 
 const aiAgent = new AIAgent({
@@ -92,72 +128,109 @@ const aiAgent = new AIAgent({
     sendAIChatMessage(`${requester}: ${response}`);
   },
   onProgress: (message, requester, { autonomous } = {}) => {
-    if (autonomous && config.ai?.autonomous?.chatProgress === false) return;
+    if (!requester || autonomous || config.ai?.chatProgress === false || config.ai?.autonomous?.chatProgress === false) return;
     sendAIChatMessage(message);
   }
 });
 
 pluginLoader.init({ config, aiAgent });
 
-// First-person C++ viewer bridge (opt-in). Start the bot with BOT_VIEW=1 and run
-// ./cpp/bot_view, then open http://127.0.0.1:8080/ to see the bot's first-person view.
-const viewFrameServer = (process.env.BOT_VIEW === '1' || config.view?.enabled === true)
+// First-person viewer bridge (opt-in): the C++ renderer draws what the bot sees
+// and sends back PERC, a compact perception summary the reflex layer plays from.
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+const viewEnabled = process.env.BOT_VIEW === '1' || config.view?.enabled === true;
+const viewConfig = config.view || {};
+const viewFrameServer = viewEnabled
   ? new FrameServer({
       getBot: () => bot,
       isConnected: () => botState.connected,
-      port: Number(process.env.VIEW_FRAME_PORT) || config.view?.port || 31337,
-      w: Number(process.env.VIEW_W) || config.view?.w || 64,
-      h: Number(process.env.VIEW_H) || config.view?.h || 48,
-      d: Number(process.env.VIEW_D) || config.view?.d || 64,
-      fps: Number(process.env.VIEW_FPS) || config.view?.fps || 6
+      port: Number(process.env.VIEW_FRAME_PORT) || viewConfig.port || 31337,
+      w: Number(process.env.VIEW_W) || viewConfig.w || 64,
+      h: Number(process.env.VIEW_H) || viewConfig.h || 48,
+      d: Number(process.env.VIEW_D) || viewConfig.d || 64,
+      tickHz: Number(process.env.VIEW_TICK_HZ) || viewConfig.tickHz || 20
     })
   : null;
-if (viewFrameServer) viewFrameServer.start();
+if (viewFrameServer) {
+  viewFrameServer.on('perception', (perception) => {
+    if (bot) bot.aiPerception = perception;
+  });
+  viewFrameServer.start();
+}
 
-// Vision-control loop: bot watches its rendered view and a vision model picks
-// actions. Needs the C++ viewer running (BOT_VIEW=1). Toggle in-game: !ai vision on/off.
+// Spawn the C++ viewer alongside the bot unless told not to. It reconnects to
+// the frame server by itself; we only restart it if the process dies.
+let viewerProcess = null;
+let viewerRestarts = 0;
+let viewerStartedAt = 0;
+function startViewerProcess() {
+  if (!viewEnabled || viewConfig.spawn === false || viewerProcess) return;
+  const binary = path.join(__dirname, viewConfig.binary || 'cpp/bot_view');
+  if (!fs.existsSync(binary)) {
+    console.log('[View] viewer binary missing - build with: g++ -O2 -std=c++17 -pthread cpp/bot_view.cpp -o cpp/bot_view');
+    return;
+  }
+  const args = [
+    '--frame-port', String(viewFrameServer ? viewFrameServer.port : 31337),
+    '--http-port', String(Number(process.env.VIEW_HTTP_PORT) || viewConfig.httpPort || 8080),
+    '--w', String(Number(process.env.VIEW_RENDER_W) || viewConfig.renderWidth || 320),
+    '--h', String(Number(process.env.VIEW_RENDER_H) || viewConfig.renderHeight || 180),
+    '--fps', String(Number(process.env.VIEW_RENDER_FPS) || viewConfig.renderFps || 60),
+    '--stream-fps', String(Number(process.env.VIEW_STREAM_FPS) || viewConfig.streamFps || 30),
+    '--quality', String(Number(process.env.VIEW_QUALITY) || viewConfig.quality || 70)
+  ];
+  if (viewConfig.threads || process.env.VIEW_THREADS) {
+    args.push('--threads', String(Number(process.env.VIEW_THREADS) || viewConfig.threads));
+  }
+  try {
+    viewerProcess = spawn(binary, args, { stdio: 'inherit' });
+    viewerStartedAt = Date.now();
+    console.log(`[View] viewer started (${args.join(' ')})`);
+  } catch (err) {
+    console.log(`[View] could not start viewer: ${err.message}`);
+    return;
+  }
+  viewerProcess.on('exit', (code, signal) => {
+    viewerProcess = null;
+    if (isShuttingDown) return;
+    const ranFor = Date.now() - viewerStartedAt;
+    viewerRestarts = ranFor > 30000 ? 1 : viewerRestarts + 1;
+    if (viewerRestarts > 5) {
+      console.log(`[View] viewer exited (${code ?? signal}) repeatedly; not restarting. Build it with cpp/README.md.`);
+      return;
+    }
+    console.log(`[View] viewer exited (${code ?? signal}); restarting in 3s`);
+    setTimeout(startViewerProcess, 3000).unref?.();
+  });
+}
+if (viewEnabled) startViewerProcess();
+
+// Vision control: reflex layer plays from PERC in real time; the LLM layer is
+// opt-in (config.vision.llm or VISION_LLM=1) because it is slow on CPU hosts.
+// Toggle in-game: !ai vision on/off.
 function createVisionController() {
   return new VisionController({
     getBot: () => bot,
     isConnected: () => botState.connected,
-    viewerUrl: process.env.VIEWER_URL || config.vision?.viewerUrl || 'http://127.0.0.1:8080',
+    getPerception: viewFrameServer ? () => viewFrameServer.lastPerception : null,
+    viewerUrl: process.env.VIEWER_URL || viewConfig.url || 'http://127.0.0.1:8080',
     ollamaUrl: process.env.OLLAMA_URL || config.ai?.ollama?.url || 'http://127.0.0.1:11434/api/chat',
     model: process.env.VISION_MODEL || config.vision?.model || 'llava',
     intervalMs: Number(process.env.VISION_INTERVAL) || config.vision?.intervalMs || 4000,
+    reflexHz: Number(process.env.VISION_REFLEX_HZ) || config.vision?.reflexHz || 10,
+    reflex: process.env.VISION_REFLEX !== '0' && config.vision?.reflex !== false,
+    llm: process.env.VISION_LLM === '1' || config.vision?.llm === true,
     dryRun: process.env.VISION_DRY === '1' || config.vision?.dryRun === true,
     enabled: true,
     onLog: (m) => console.log(`[Vision] ${m}`)
   });
 }
 let visionController = null;
-if (process.env.BOT_VISION === '1' || config.vision?.enabled === true) {
+if (viewEnabled || config.vision?.enabled === true) {
   visionController = createVisionController();
   visionController.start();
 }
-
-// Optional browser 3D view of the bot's eyes (BOT_VIEWER=1 or view.browser.enabled). Needs DASHBOARD_TOKEN.
-const browserViewerEnabled = process.env.BOT_VIEWER === '1' || config.view?.browser?.enabled === true;
-const browserViewerPort = Number(process.env.VIEWER_PORT) || config.view?.browser?.port || 3007;
-const browserViewer = browserViewerEnabled
-  ? new BrowserViewer({
-      port: browserViewerPort,
-      host: process.env.VIEWER_HOST || process.env.HOST || '127.0.0.1',
-      token: process.env.DASHBOARD_TOKEN,
-      viewDistance: Number(process.env.VIEWER_DISTANCE) || config.view?.browser?.viewDistance || 6,
-      firstPerson: config.view?.browser?.firstPerson !== false,
-      controls: {
-        busy: () => ['working', 'paused'].includes(aiAgent.getStatus().status),
-        input: (input, pressed) => manualControlSession.set(input, pressed),
-        action: (action, payload) => manualControlSession.performAction(action, payload),
-        release: () => manualControlSession.release(),
-        heartbeat: () => manualControlSession.heartbeat(),
-        look: (yaw, pitch) => (bot && botState.connected ? bot.look(yaw, pitch, true) : undefined),
-        chat: text => { if (bot && botState.connected) bot.chat(text); }
-      },
-      log: message => console.log(message)
-    })
-  : null;
-const browserViewerActive = Boolean(browserViewer && browserViewer.start());
 
 function hasDashboardAccess(req) {
   const expected = process.env.DASHBOARD_TOKEN;
@@ -166,14 +239,6 @@ function hasDashboardAccess(req) {
   const expectedBuffer = Buffer.from(expected);
   const providedBuffer = Buffer.from(provided);
   return expectedBuffer.length === providedBuffer.length &&
-    crypto.timingSafeEqual(expectedBuffer, providedBuffer);
-}
-
-function secretsMatch(expected, provided) {
-  const expectedBuffer = Buffer.from(String(expected || ''));
-  const providedBuffer = Buffer.from(String(provided || ''));
-  return expectedBuffer.length > 0 &&
-    expectedBuffer.length === providedBuffer.length &&
     crypto.timingSafeEqual(expectedBuffer, providedBuffer);
 }
 
@@ -346,27 +411,6 @@ app.get('/', (req, res) => {
               </div>
             </div>
           </div>
-          ${browserViewerActive ? `<div class="card">
-            <div class="label">3D view (bot's eyes)</div>
-            <p class="control-help">Enter the dashboard token below, then open the live first-person view. Use the controls under it to move the bot.</p>
-            <button class="control-key" type="button" id="open-3d-view">Open 3D view</button>
-            <button class="control-key" type="button" id="open-3d-full">Full screen (play with keyboard and mouse)</button>
-            <iframe id="view-3d" title="Bot 3D view" style="display:none;width:100%;aspect-ratio:16/9;height:auto;border:0;border-radius:8px;margin-top:8px;background:#000"></iframe>
-            <script>
-              document.getElementById('open-3d-view').addEventListener('click', function () {
-                var token = document.getElementById('dashboard-token').value;
-                if (!token) { alert('Enter the dashboard token first.'); return; }
-                var frame = document.getElementById('view-3d');
-                frame.src = location.protocol + '//' + location.hostname + ':${browserViewerPort}/watch?token=' + encodeURIComponent(token);
-                frame.style.display = 'block';
-              });
-              document.getElementById('open-3d-full').addEventListener('click', function () {
-                var token = document.getElementById('dashboard-token').value;
-                if (!token) { alert('Enter the dashboard token first.'); return; }
-                window.open(location.protocol + '//' + location.hostname + ':${browserViewerPort}/watch?token=' + encodeURIComponent(token), '_blank');
-              });
-            </script>
-          </div>` : ''}
           <div class="card">
             <div class="label">Manual bot controls</div>
             <p class="control-help">Use W/A/S/D to move, Space to jump, Shift to sneak, Ctrl to sprint. Press Q to drop held items, Left-Click to attack/mine, Right-Click to use/place, F to swap offhand, and 1-9 for hotbar slots.</p>
@@ -413,6 +457,17 @@ app.get('/', (req, res) => {
             <textarea id="instruction" maxlength="500" placeholder="Mine enough stone for a furnace"></textarea>
             <button class="btn" id="submit-instruction" type="button">Start instruction</button>
             <button class="btn" id="stop-instruction" type="button">Stop</button>
+            <div style="margin-top:12px;">
+              <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:6px;">Quick AI Macros:</div>
+              <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;">
+                <button class="control-key macro-btn" type="button" data-macro="guard me">🛡️ Guard Me</button>
+                <button class="control-key macro-btn" type="button" data-macro="sort chests">📦 Sort Chests</button>
+                <button class="control-key macro-btn" type="button" data-macro="inspect storage">🔍 Index Storage</button>
+                <button class="control-key macro-btn" type="button" data-macro="farm">🌾 Auto Farm & Bread</button>
+                <button class="control-key macro-btn" type="button" data-macro="build tower">🏰 Build Tower</button>
+                <button class="control-key macro-btn" type="button" data-macro="strip mine 16">⛏️ Strip Mine 16</button>
+              </div>
+            </div>
             <p class="ai-status" id="ai-status">Enter your dashboard control token to view task status.</p>
           </div>
           <a href="/tutorial" class="btn">View Setup Guide</a>
@@ -565,7 +620,7 @@ app.get('/', (req, res) => {
             btn.addEventListener('click', async () => {
               const dir = btn.dataset.aim;
               try {
-                const health = await fetch('/health', { headers: { 'x-dashboard-token': dashboardTokenInput.value } });
+                const health = await fetch('/health');
                 const hData = await health.json();
                 const coords = hData.coords || { x: 0, y: 64, z: 0 };
                 let target = { ...coords };
@@ -677,6 +732,19 @@ app.get('/', (req, res) => {
             setInterval(refreshAIStatus, 5000);
           }
 
+          const macroButtons = [...document.querySelectorAll('[data-macro]')];
+          macroButtons.forEach(btn => {
+            btn.addEventListener('click', async () => {
+              if (instructionInput) instructionInput.value = btn.dataset.macro;
+              try {
+                const res = await aiRequest('/api/instruction', { instruction: btn.dataset.macro });
+                aiStatus.innerText = res.message + ' (' + res.status + ')';
+              } catch (err) {
+                aiStatus.innerText = err.message;
+              }
+            });
+          });
+
           const radarCanvas = document.getElementById('radar-canvas');
           const radarCtx = radarCanvas ? radarCanvas.getContext('2d') : null;
           const hpBar = document.getElementById('hp-bar');
@@ -690,17 +758,8 @@ app.get('/', (req, res) => {
           async function updateRadar() {
             if (!radarCtx) return;
             try {
-              const res = await fetch('/api/radar', { headers: { 'x-dashboard-token': dashboardTokenInput.value } });
+              const res = await fetch('/api/radar');
               const data = await res.json();
-              if (res.status === 401) {
-                radarCtx.clearRect(0, 0, 240, 240);
-                radarCtx.fillStyle = '#64748b';
-                radarCtx.font = '12px sans-serif';
-                radarCtx.textAlign = 'center';
-                radarCtx.fillText('Enter dashboard token', 120, 120);
-                if (radarSummary) radarSummary.innerText = 'Token required';
-                return;
-              }
               if (!data.connected) {
                 radarCtx.clearRect(0, 0, 240, 240);
                 radarCtx.fillStyle = '#64748b';
@@ -910,7 +969,7 @@ app.get('/health', (req, res) => {
     status: botState.connected ? 'connected' : 'disconnected',
     serverOffline: Boolean(botState.serverOffline),
     uptime: Math.floor((Date.now() - botState.startTime) / 1000),
-    coords: (bot && bot.entity && hasDashboardAccess(req)) ? bot.entity.position : null,
+    coords: (bot && bot.entity) ? bot.entity.position : null,
     lastActivity: botState.lastActivity,
     lastDisconnectReason: botState.serverOffline
       ? '⚠️ Server is OFFLINE. Please turn on your server! (Bot will keep reconnecting automatically)'
@@ -921,9 +980,6 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/api/radar', (req, res) => {
-  if (!hasDashboardAccess(req)) {
-    return res.status(401).json({ error: 'Dashboard token required.' });
-  }
   if (!bot || !botState.connected || !bot.entity) {
     return res.json({
       connected: false,
@@ -1030,10 +1086,10 @@ app.post('/api/discord/chat', (req, res) => {
   const secretProvided = req.headers['x-discord-token'] || req.body?.token;
   const configuredSecret = process.env.DISCORD_RELAY_TOKEN || config.discord?.relaySecret;
 
-  // Fail closed: with no relay secret configured, only a valid dashboard token is accepted.
-  const authorized = secretsMatch(configuredSecret, secretProvided) || hasDashboardAccess(req);
-  if (!authorized) {
-    return res.status(401).json({ error: 'Unauthorized: invalid Discord relay token.' });
+  if (configuredSecret && secretProvided !== configuredSecret) {
+    if (!hasDashboardAccess(req)) {
+      return res.status(401).json({ error: 'Unauthorized: invalid Discord relay token.' });
+    }
   }
 
   const username = String(req.body?.username || 'DiscordUser').trim().slice(0, 32);
@@ -1161,7 +1217,7 @@ app.post('/api/agent/stop', (req, res) => {
 
 app.get('/ping', (req, res) => res.send('pong'));
 
-const server = app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`[Server] HTTP server started on port ${server.address().port}`);
 });
 
@@ -1169,7 +1225,7 @@ server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
     const fallbackPort = PORT + 1;
     console.log(`[Server] Port ${PORT} in use - trying port ${fallbackPort}`);
-    app.listen(fallbackPort, HOST, () => {
+    app.listen(fallbackPort, '0.0.0.0', () => {
       console.log(`[Server] HTTP server started on fallback port ${fallbackPort}`);
     });
   } else {
@@ -1232,11 +1288,48 @@ function addInterval(callback, delay) {
   return id;
 }
 
+function formatKickReason(raw) {
+  if (!raw) return 'Unknown reason';
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return formatKickReason(parsed);
+    } catch {
+      return raw.replace(/§[0-9a-fk-or]/gi, '').trim();
+    }
+  }
+  if (typeof raw === 'object') {
+    if (raw.type === 'compound' && raw.value) {
+      return formatKickReason(raw.value);
+    }
+    if (raw.translate) {
+      const transKey = typeof raw.translate === 'object' ? (raw.translate.value || raw.translate.text || JSON.stringify(raw.translate)) : raw.translate;
+      if (transKey === 'disconnect.spam') return 'Kicked for spamming (too many messages/commands sent too quickly)';
+      if (transKey === 'disconnect.timeout') return 'Connection timed out';
+      if (transKey === 'disconnect.kicked') return 'Kicked by operator or server plugin';
+      if (transKey === 'disconnect.loginFailedInfo') return 'Login failed';
+      return String(transKey);
+    }
+    let result = '';
+    if (raw.text) {
+      result += typeof raw.text === 'object' ? (raw.text.value || '') : raw.text;
+    }
+    if (Array.isArray(raw.extra)) {
+      result += raw.extra.map(item => (typeof item === 'object' ? formatKickReason(item) : String(item))).join('');
+    }
+    const clean = result.replace(/§[0-9a-fk-or]/gi, '').trim();
+    return clean || JSON.stringify(raw);
+  }
+  return String(raw);
+}
+
 function isDuplicateLoginReason(reason) {
   const text = String(reason || '').toLowerCase();
   return text.includes('duplicate_login') ||
     text.includes('another location') ||
-    text.includes('already connected');
+    text.includes('already connected') ||
+    text.includes('already logged in') ||
+    text.includes('logged in from another');
 }
 
 function isServerOfflineError(reason) {
@@ -1339,6 +1432,18 @@ function createBot() {
       respawn: true,
       checkTimeoutInterval: 600000
     });
+    const patchBotChat = () => {
+      if (!bot || typeof bot.chat !== 'function' || bot._rawChat) return;
+      const originalChat = bot.chat.bind(bot);
+      bot._rawChat = originalChat;
+      bot.chat = (msg) => enqueueSafeChat(msg, originalChat);
+    };
+    if (bot._client?.write) {
+      bot.once('inject_allowed', patchBotChat);
+      setTimeout(patchBotChat, 3000);
+    } else {
+      patchBotChat();
+    }
     installProtocolPacketCompatibility(bot);
 
     blockAtGuardTimer = setInterval(() => {
@@ -1391,7 +1496,6 @@ function createBot() {
 
       console.log(`[Bot] Spawned on server (version: ${bot.version})`);
       pluginLoader.onBotReady(bot);
-      if (browserViewerActive) browserViewer.attach(bot);
 
       if (config.discord?.events?.connect) {
         sendDiscordWebhook(`Connected to \`${config.server.ip}\``, 0x4ade80);
@@ -1400,11 +1504,43 @@ function createBot() {
       const mcData = require('minecraft-data')(bot.version);
       const defaultMove = new Movements(bot, mcData);
       defaultMove.allowFreeMotion = false;
-      defaultMove.canDig = false;
+      defaultMove.canDig = true;
+      defaultMove.digCost = 15;
+      defaultMove.maxDropDown = 4;
       defaultMove.liquidCost = 1000;
       defaultMove.fallDamageCost = 1000;
 
       initializeModules(bot, mcData, defaultMove, authPassword);
+
+      let mlgClutchActive = false;
+      bot.on('physicsTick', async () => {
+        if (!bot || !bot.entity || mlgClutchActive) return;
+        const velY = bot.entity.velocity ? bot.entity.velocity.y : 0;
+        if (velY < -0.65 && !bot.entity.isInWater && !bot.entity.isInLava) {
+          const inv = bot.inventory?.items ? bot.inventory.items() : [];
+          const waterBucket = inv.find(it => it.name === 'water_bucket');
+          if (waterBucket) {
+            const feetPos = bot.entity.position;
+            const ground = bot.blockAt ? bot.blockAt(feetPos.offset(0, -1, 0)) : null;
+            if (ground && ground.boundingBox === 'block' && ground.name !== 'air') {
+              mlgClutchActive = true;
+              try {
+                if (typeof bot.equip === 'function') await bot.equip(waterBucket, 'hand');
+                if (typeof bot.look === 'function') await bot.look(bot.entity.yaw, -Math.PI / 2, true);
+                if (typeof bot.activateItem === 'function') bot.activateItem();
+                setTimeout(() => {
+                  try {
+                    if (typeof bot.activateItem === 'function') bot.activateItem();
+                  } catch {}
+                  mlgClutchActive = false;
+                }, 400);
+              } catch {
+                mlgClutchActive = false;
+              }
+            }
+          }
+        }
+      });
 
       setTimeout(() => {
         if (bot && botState.connected && !config.ai?.enabled && config.server['try-creative']) {
@@ -1445,38 +1581,43 @@ function createBot() {
     bot.on('respawn', scheduleDeathRecovery);
 
     bot.on('kicked', (reason) => {
-      const kickReason = typeof reason === 'object' ? JSON.stringify(reason) : reason;
-      kickedReason = String(kickReason || 'Unknown');
-      console.log(`[Bot] Kicked: ${kickReason}`);
+      const readableKick = formatKickReason(reason);
+      kickedReason = readableKick;
+      console.log(`[Bot] 🚨 Kicked from server: "${readableKick}"`);
       botState.connected = false;
       manualControlSession.disconnect();
-      botState.lastDisconnectReason = kickedReason;
-      pushError({ type: 'kicked', reason: kickReason, time: Date.now() });
+      botState.lastDisconnectReason = readableKick;
+      pushError({ type: 'kicked', reason: readableKick, time: Date.now() });
+      chatQueue.length = 0;
       clearAllIntervals();
       clearBlockAtGuard();
 
-      const reasonStr = String(kickReason).toLowerCase();
+      const reasonStr = String(readableKick).toLowerCase();
+      if (reasonStr.includes('spam')) {
+        console.log('[Bot] ⚠️ Anti-spam kick detected — cleared outgoing chat queue and throttled commands.');
+        botState.wasThrottled = true;
+      }
       if (reasonStr.includes('throttl') || reasonStr.includes('wait before reconnect') || reasonStr.includes('too fast')) {
         console.log('[Bot] Throttle kick detected');
         botState.wasThrottled = true;
       }
 
-      if (isDuplicateLoginReason(kickReason)) {
+      if (isDuplicateLoginReason(readableKick)) {
         console.log('[Bot] Another client is using this username - backing off before reconnecting');
         botState.duplicateLogin = true;
       }
 
       if (config.discord?.events?.disconnect) {
-        sendDiscordWebhook(`Kicked: ${kickReason}`, 0xff0000);
+        sendDiscordWebhook(`Kicked: ${readableKick}`, 0xff0000);
       }
       scheduleReconnect();
     });
 
     bot.on('end', (reason) => {
-      const disconnectReason = kickedReason || String(reason || 'Unknown');
+      chatQueue.length = 0;
+      const disconnectReason = kickedReason || formatKickReason(reason);
       console.log(`[Bot] Disconnected: ${disconnectReason}`);
       pluginLoader.onBotEnd(bot);
-      if (browserViewerActive) browserViewer.detach();
       botState.connected = false;
       manualControlSession.disconnect();
       botState.lastDisconnectReason = disconnectReason;
@@ -1601,46 +1742,78 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
   }
 
   if (config.utils['auto-auth']?.enabled && authPassword) {
-    let authHandled = false;
+    const MAX_AUTH_ATTEMPTS = 2;
+    const AUTH_RETRY_COOLDOWN_MS = 6000;
+    let authCompleted = false;
+    let authAttempts = 0;
+    let lastAttemptAt = 0;
+    let lastPromptText = '';
+    let lastPromptAt = 0;
 
-    const tryAuth = (type) => {
-      if (authHandled || !bot || !botState.connected) return;
-      authHandled = true;
-      if (type === 'register') {
+    const IGNORED = /unknown command|did you mean|usage:|incorrect usage|invalid usage|command not found/i;
+    const REGISTER_PROMPT = /please register|not registered|register with \/register|\/register <password>|register <password>/i;
+    const LOGIN_PROMPT = /please login|not logged in|already registered|login with \/login|\/login <password>|login <password>/i;
+    const SUCCESS = /successfully|logged in|welcome back|registration complete|registered successfully|성공/i;
+    const WRONG_PASSWORD = /wrong password|incorrect password|invalid password|비밀번호/i;
+
+    const canSend = () => {
+      if (authCompleted || authAttempts >= MAX_AUTH_ATTEMPTS) return false;
+      if (!bot || !botState.connected) return false;
+      if (Date.now() - lastAttemptAt < AUTH_RETRY_COOLDOWN_MS) return false;
+      return true;
+    };
+
+    const handleAuthMessage = (rawText) => {
+      if (authCompleted || !bot || !botState.connected) return;
+      const clean = String(rawText || '').replace(/§[0-9a-fk-or]/gi, '').trim();
+      if (!clean || IGNORED.test(clean)) {
+        if (IGNORED.test(clean)) {
+          authCompleted = true;
+          console.log('[Auth] Server has no auth prompt; treating the account as authenticated.');
+        }
+        return;
+      }
+      const now = Date.now();
+      if (clean === lastPromptText && now - lastPromptAt < 15000) return;
+      lastPromptAt = now;
+      lastPromptText = clean;
+
+      if (SUCCESS.test(clean)) {
+        authCompleted = true;
+        console.log('[Auth] Successfully authenticated!');
+        return;
+      }
+      if (WRONG_PASSWORD.test(clean)) {
+        console.error(`[Auth] Server reported a password problem for "${authPassword}"! Check settings.json.`);
+        return;
+      }
+      const wantsRegister = REGISTER_PROMPT.test(clean);
+      const wantsLogin = LOGIN_PROMPT.test(clean);
+      if (!wantsRegister && !wantsLogin) return;
+      if (!canSend()) return;
+      authAttempts += 1;
+      lastAttemptAt = now;
+      if (wantsRegister && config.utils['auto-auth']?.register) {
         bot.chat(`/register ${authPassword} ${authPassword}`);
-        console.log('[Auth] Sent /register');
+        console.log(`[Auth] Sent /register (attempt ${authAttempts}/${MAX_AUTH_ATTEMPTS})`);
       } else {
         bot.chat(`/login ${authPassword}`);
-        console.log('[Auth] Sent /login');
+        console.log(`[Auth] Sent /login (attempt ${authAttempts}/${MAX_AUTH_ATTEMPTS})`);
       }
     };
 
-    bot.on('messagestr', (message) => {
-      if (authHandled) return;
-      const msg = message.toLowerCase();
-      if (msg.includes('/register') || msg.includes('register ') || msg.includes('지정된 비밀번호')) {
-        tryAuth('register');
-      } else if (msg.includes('/login') || msg.includes('login ') || msg.includes('로그인')) {
-        tryAuth('login');
-      }
+    bot.on('messagestr', handleAuthMessage);
+    bot.on('actionBar', (msg) => {
+      const text = typeof msg?.getText === 'function' ? msg.getText() : String(msg?.text || msg || '');
+      handleAuthMessage(text);
     });
+    bot.on('title', (text) => handleAuthMessage(text));
 
     setTimeout(() => {
-      if (authHandled || !bot || !botState.connected) return;
-      if (config.utils['auto-auth']?.register) {
-        console.log('[Auth] No prompt after 10s, sending /register then /login as failsafe');
-        bot.chat(`/register ${authPassword} ${authPassword}`);
-        setTimeout(() => {
-          if (!bot || !botState.connected) return;
-          bot.chat(`/login ${authPassword}`);
-          console.log('[Auth] Sent /login fallback');
-        }, 2500);
-      } else {
-        console.log('[Auth] No prompt after 10s, sending /login as failsafe');
-        bot.chat(`/login ${authPassword}`);
-      }
-      authHandled = true;
-    }, 10000);
+      if (authCompleted || !bot || !botState.connected) return;
+      if (authAttempts > 0) return;
+      console.log('[Auth] No auth prompt seen; not sending anything until the server asks.');
+    }, 3000);
   }
 
   if (config.ai?.enabled) {
@@ -1655,7 +1828,6 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
       }
     }
     console.log('[AI] AI mode enabled; user tasks, safe hostile-mob defense, and death recovery are active.');
-    return;
   }
 
   if (config.utils['chat-messages']?.enabled) {
@@ -1676,26 +1848,31 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
     }
   }
 
-  if (config.position?.enabled && !(config.movement?.['circle-walk']?.enabled)) {
+  if (config.position?.enabled && !(config.movement?.['circle-walk']?.enabled) && !config.ai?.enabled) {
     bot.pathfinder.setMovements(defaultMove);
     bot.pathfinder.setGoal(new GoalBlock(config.position.x, config.position.y, config.position.z));
     console.log('[Position] Navigating to configured position...');
   }
 
   if (config.utils['anti-afk']?.enabled) {
+    const isBotBusy = () => {
+      if (!bot || !botState.connected || manualControls.size) return true;
+      if (config.ai?.enabled && ['working'].includes(aiAgent.getStatus().status)) return true;
+      return false;
+    };
 
     addInterval(() => {
-      if (!bot || !botState.connected || manualControls.size) return;
+      if (isBotBusy()) return;
       try { bot.swingArm(); } catch (e) { }
     }, 10000 + Math.floor(Math.random() * 50000));
 
     addInterval(() => {
-      if (!bot || !botState.connected || manualControls.size) return;
+      if (isBotBusy()) return;
       try { bot.setQuickBarSlot(Math.floor(Math.random() * 9)); } catch (e) { }
     }, 30000 + Math.floor(Math.random() * 90000));
 
     addInterval(() => {
-      if (!bot || !botState.connected || manualControls.size || typeof bot.setControlState !== 'function') return;
+      if (isBotBusy() || typeof bot.setControlState !== 'function') return;
       if (Math.random() > 0.9) {
         let count = 2 + Math.floor(Math.random() * 4);
         const doTeabag = () => {
@@ -1715,7 +1892,7 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
 
     if (!(config.movement?.['circle-walk']?.enabled)) {
       addInterval(() => {
-        if (!bot || !botState.connected || typeof bot.setControlState !== 'function') return;
+        if (isBotBusy() || typeof bot.setControlState !== 'function') return;
         try {
           bot.look(Math.random() * Math.PI * 2, 0, true);
           bot.setControlState('forward', true);
@@ -1758,7 +1935,7 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
   if (config.modules.beds) {
     bedModule(bot, mcData);
   }
-  if (config.utils['chat-log']) {
+  if (config.utils['chat-log'] || config.ai?.enabled) {
     bot.on('chat', (username, message) => {
       if (username !== bot.username) {
         console.log(`[Chat] <${username}> ${message}`);
@@ -2054,6 +2231,13 @@ function chatModule(bot) {
               const st = visionController ? visionController.status() : { enabled: false };
               sendAIChatMessage(`Vision control ${st.enabled ? 'ON' : 'off'} (model ${st.model || '?'}, ticks ${st.ticks || 0}, last ${st.lastAction || 'none'}). Say !ai vision on/off.`);
             }
+          } else if (aiCommand.type === 'sygget') {
+            const syggetTask = (aiCommand.text || '').trim();
+            const target = syggetTask && !/^(?:me|set me|make me)$/i.test(syggetTask)
+              ? syggetTask
+              : AUTONOMOUS_INSTRUCTION;
+            aiAgent.start(target, username);
+            sendAIChatMessage(`${username}: Sygget engaged — working on that now. Use !ai status to check progress.`);
           } else {
             const isQuestion = /\?$/.test(aiCommand.text) ||
               /^(?:who|what|how|why|when|where|which|can|could|would|will|is|are|does|do|did|tell|joke|calc|calculate|recipe|status|help)\b/i.test(aiCommand.text);
@@ -2218,6 +2402,9 @@ function shutdown(signal) {
   clearBotTimeouts();
   clearAllIntervals();
   clearBlockAtGuard();
+  try { if (visionController) visionController.stop(); } catch { /* ignore */ }
+  try { if (viewFrameServer) viewFrameServer.stop(); } catch { /* ignore */ }
+  try { if (viewerProcess) { viewerProcess.kill(); viewerProcess = null; } } catch { /* ignore */ }
   if (bot) {
     try {
       manualControlSession.release();
@@ -2233,9 +2420,54 @@ function shutdown(signal) {
     }
     bot = null;
   }
+  // Clean up the force-stop marker file
+  try {
+    const dir = getForceStopDir();
+    const markerFile = path.join(dir, 'force-stop.marker');
+    const logFile = path.join(dir, 'force-stop.log');
+    if (fs.existsSync(markerFile)) fs.unlinkSync(markerFile);
+    if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
+  } catch (e) {
+    // ignore cleanup errors
+  }
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000).unref();
 }
+
+// ── Force-stop marker file (cross-device/terminal stop) ────────────────────
+// scripts/fs.js writes a marker file to the bot's state folder; this function
+// checks for it every 10s and shuts down all sessions when triggered.
+const FORCE_STOP_INTERVAL_MS = 10000;
+let forceStopDetected = false;
+
+function getForceStopDir() {
+  const isWin = process.platform === 'win32';
+  const homeDir = os.homedir();
+  const appData = process.env.APPDATA || (isWin ? path.join(homeDir, 'AppData', 'Roaming') : null);
+  return (appData || path.join(homeDir, '.config', 'minecraft-afk-bot', 'state'));
+}
+
+function checkForceStop() {
+  const dir = getForceStopDir();
+  const markerFile = path.join(dir, 'force-stop.marker');
+  const logFile = path.join(dir, 'force-stop.log');
+  try {
+    if (fs.existsSync(markerFile)) {
+      const record = JSON.parse(fs.readFileSync(markerFile, 'utf8'));
+      if (!forceStopDetected) {
+        forceStopDetected = true;
+        console.log(`[FS] Force-stop marker detected from ${record.who} (location=${record.location}, pid=${record.pid}, ${record.timestamp})`);
+        if (logFile && fs.existsSync(logFile)) {
+          console.log(`[FS] Full log: ${logFile}`);
+        }
+        shutdown('SIGINT: force-stop marker');
+      }
+    }
+  } catch (err) {
+    // ignore read errors
+  }
+}
+activeIntervals.push(setInterval(checkForceStop, FORCE_STOP_INTERVAL_MS).unref());
 
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));

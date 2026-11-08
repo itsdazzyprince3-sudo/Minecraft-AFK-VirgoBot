@@ -1,0 +1,101 @@
+#!/bin/bash
+# Force stop (fs) - Stop all Minecraft AFK Bot sessions across all devices/terminals
+# Usage: ./fs [reason] [location]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NODE_BIN="${NODE_BIN:-node}"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Determine the state folder (same as fs.js)
+IS_WIN=false
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+  IS_WIN=true
+fi
+
+HOME_DIR="$HOME"
+APP_DATA="${APPDATA:-$HOME_DIR/.config}"
+if $IS_WIN; then
+  APPDATA="${APPDATA:-$HOME_DIR/AppData/Roaming}"
+  if [ -n "$APPDATA" ]; then
+    CONFIG_DIR="$APPDATA"
+  else
+    CONFIG_DIR="$HOME_DIR/.config"
+  fi
+else
+  CONFIG_DIR="$HOME_DIR/.config"
+fi
+
+STATE_DIR="$CONFIG_DIR/minecraft-afk-bot/state"
+MARKER_FILE="$STATE_DIR/force-stop.marker"
+LOG_FILE="$STATE_DIR/force-stop.log"
+
+# Create state directory
+mkdir -p "$STATE_DIR"
+
+# Build the record
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+WHO="bash $0"
+LOCATION="${3:-default}"
+REASON="${1:-Force stop requested}"
+PID=$$
+
+# Get local IP
+LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "unknown")
+
+# Build the JSON record
+cat > "$MARKER_FILE" <<EOF
+{
+  "id": "$(date +%s | sha256sum | head -c 12)",
+  "timestamp": "$TIMESTAMP",
+  "who": "$WHO",
+  "location": "$LOCATION",
+  "reason": "$REASON",
+  "os": "linux",
+  "pid": $PID,
+  "nodeVersion": "$(node --version)",
+  "machine": "$(hostname)",
+  "ip": "$LOCAL_IP",
+  "cmd": "$(ps -o args= -p $PID 2>/dev/null)"
+}
+EOF
+
+# Append to log
+echo "$TIMESTAMP [fs] Force stop triggered (location=$LOCATION, pid=$PID, node=$(node --version)) from $LOCAL_IP on $(hostname)" >> "$LOG_FILE"
+cat "$MARKER_FILE" >> "$LOG_FILE"
+
+# Kill running bot processes (Unix)
+PIDS=$(pgrep -f "index\.js" 2>/dev/null || true)
+if [ -n "$PIDS" ]; then
+  for PID in $PIDS; do
+    if ! kill -0 $PID 2>/dev/null; then
+      continue
+    fi
+    # Don't kill this fs script itself
+    if [ "$PID" = "$PID" ]; then
+      :
+    fi
+    COMMAND=$(ps -p $PID -o comm= 2>/dev/null || echo "unknown")
+    kill -TERM $PID 2>/dev/null && echo "[FS] Sent SIGTERM to pid $PID ($COMMAND)" || echo "[FS] Could not kill pid $PID"
+  done
+fi
+
+# Also try taskkill on Windows
+if $IS_WIN; then
+  PIDS=$(tasklist /FI "IMAGENAME eq node.exe" /FO CSV 2>/dev/null | tail -n +2 | grep -v "^$")
+  if [ -n "$PIDS" ]; then
+    while IFS= read -r line; do
+      PID=$(echo "$line" | tr -d '"' | cut -d',' -f2)
+      COMMAND=$(wmic process where ProcessId=$PID get CommandLine 2>/dev/null | tail -1)
+      taskkill /PID $PID /F 2>/dev/null && echo "[FS] Sent SIGTERM to pid $PID ($COMMAND)" || echo "[FS] Could not kill pid $PID"
+    done <<< "$PIDS"
+  fi
+fi
+
+echo "[FS] Force stop triggered successfully."
+echo "[FS] Marker written to: $MARKER_FILE"
+echo "[FS] Who: $WHO (pid $PID, node $(node --version))"
+echo "[FS] Location: $LOCATION"
+echo "[FS] Time: $TIMESTAMP"
+echo "[FS] Machine: $(hostname) ($LOCAL_IP)"
+echo "[FS] All bot sessions in this folder should now stop."
+echo "[FS] Check $MARKER_FILE and $LOG_FILE for details."

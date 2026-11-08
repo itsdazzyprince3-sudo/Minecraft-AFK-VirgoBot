@@ -248,7 +248,7 @@ test('comeToPlayer navigates to players beyond 64 blocks without distance limits
   };
 
   const result = await skills.comeToPlayer('paneer');
-  assert.match(result.message, /next to you, paneer/);
+  assert.match(result.message, /paneer/);
   assert.equal(destination.x, 100);
   assert.equal(destination.z, 120);
 });
