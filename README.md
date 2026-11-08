@@ -1,4 +1,4 @@
-# Aternos 24/7 Hosting Bot
+# Minecraft AFK Bot (VirgoBot)
 
 A Minecraft bot that joins your server and keeps it alive around the clock.
 It reconnects automatically if kicked or if the server restarts, and can be
@@ -39,6 +39,39 @@ uses the configured cloud provider when a key is present. Set `OLLAMA_URL` or
 can reach it or configure a supported cloud provider. Deterministic Minecraft
 skills handle actions and verify game state, so gameplay does not depend on the
 language model inventing or directly executing game commands.
+
+> **Want the exact game screen and a real player?** See [`real-client/`](real-client/README.md): the real Minecraft client with Baritone, watched in your browser.
+
+### Live 3D view (see what the bot sees)
+
+Start the bot with `BOT_VIEWER=1` (or set `view.browser.enabled` to `true` in
+`settings.json`) and a `DASHBOARD_TOKEN`. The dashboard then shows a **3D view**
+card: enter the token, press **Open 3D view**, and a first-person view of the bot's
+world appears next to the movement controls, with a Minecraft-style HUD drawn on top
+(hearts, hunger, XP, hotbar with item icons, crosshair, coordinates and recent chat).
+The HUD uses the game's own sprites and font; the standalone page is at
+`http://127.0.0.1:3007/watch?token=...` (the dashboard's **Full screen** button opens it).
+
+**Play from the browser.** On that page, click the view to take control: `WASD` move, mouse
+looks (pointer lock), `Space` jump, `Shift` sneak, `Ctrl` sprint, `1`-`9` hotbar, left click
+attacks, right click uses, `Q` drops, `F` swaps hands, `T` opens a chat box, `Esc` releases the
+mouse. It uses the bot's existing manual-control system, so patrol and anti-AFK pause while you
+drive, and keys are released if the page closes or stops sending heartbeats. It refuses while an
+AI task is running.
+
+**Speed.** The 3D view is drawn by your own browser's GPU, not streamed as video, so its frame
+rate follows your device (up to your screen's refresh rate); only small position updates cross
+the network. The top-right readout shows the real render fps and the round-trip ping. Mouse
+look has one network round trip of latency. Lower `VIEWER_DISTANCE` (default 6) on weak phones. It uses `prismarine-viewer` and the
+native `canvas` package, both optional; install them with
+`npm install prismarine-viewer canvas` if `npm install` skipped them.
+
+The view runs on port `3007` (`VIEWER_PORT`), binds to `127.0.0.1` unless `HOST` or
+`VIEWER_HOST` is set, and requires the dashboard token. It shows a render of the
+chunks the bot has loaded plus that HUD, not the official game client (no inventory screens or
+entity models; for the exact game screen see `real-client/`). To use it on a phone or
+another computer, run the bot on that device or open the port through your own
+tunnel, and keep `DASHBOARD_TOKEN` secret.
 
 ### AI chat and survival behavior
 
@@ -401,6 +434,8 @@ provider or dashboard secrets in `settings.json` or commit them:
 | `OPENAI_MODEL` | Optional OpenAI model override; defaults to `gpt-5.5` |
 | `OPENAI_REASONING_EFFORT` | OpenAI reasoning level: `low`, `medium`, `high`, or `xhigh` (defaults to `low`) |
 | `DASHBOARD_TOKEN` | Required private token for submitting and stopping tasks from the dashboard |
+| `DISCORD_RELAY_TOKEN` | Secret for `POST /api/discord/chat`. If unset, the relay only accepts a valid `DASHBOARD_TOKEN` |
+| `HOST` | Interface the web server binds to. Defaults to `127.0.0.1`, or `0.0.0.0` when the host platform sets `PORT` |
 
 To use Lunax, add `LUNAX_API_KEY` to `.env`; `AI_PROVIDER=auto` selects it
 when present and uses `lunax-chat` at `https://lunax.co/api/v1/chat/completions`.

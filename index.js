@@ -23,6 +23,7 @@ const { installProtocolPacketCompatibility } = require('./lib/protocol-packet-co
 const pluginLoader = require('./lib/plugin-loader');
 const { FrameServer } = require('./lib/frame-server');
 const { VisionController } = require('./lib/vision-controller');
+const { BrowserViewer } = require('./lib/browser-viewer');
 const { LinuxScreenCapture } = require('./lib/linux-screen-capture');
 const { buildViewTelemetry, getLocalViewerUrl } = require('./lib/view-telemetry');
 const settingsPath = require('node:path').join(__dirname, 'settings.json');
@@ -38,6 +39,9 @@ const { resolveBotVersion } = require('./lib/version');
 const app = express();
 app.use(express.json({ limit: '8kb' }));
 const PORT = process.env.PORT || 5000;
+// Bind to loopback unless HOST is set. Hosting platforms that inject PORT (Render, Replit, etc.)
+// need an external interface, so default to 0.0.0.0 only when PORT is provided by the environment.
+const HOST = process.env.HOST || (process.env.PORT ? '0.0.0.0' : '127.0.0.1');
 
 let bot = null;
 let activeIntervals = [];
@@ -258,6 +262,32 @@ if (viewEnabled || config.vision?.enabled === true || desktopControlEnabled) {
   visionController.start();
 }
 
+// Optional browser 3D view of the bot's eyes (BOT_VIEWER=1 or view.browser.enabled). Needs DASHBOARD_TOKEN.
+const browserViewerEnabled = process.env.BOT_VIEWER === '1' || config.view?.browser?.enabled === true;
+const browserViewerPort = Number(process.env.VIEWER_PORT) || config.view?.browser?.port || 3007;
+const browserViewer = browserViewerEnabled
+  ? new BrowserViewer({
+      port: browserViewerPort,
+      host: process.env.VIEWER_HOST || process.env.HOST || '127.0.0.1',
+      token: process.env.DASHBOARD_TOKEN,
+      viewDistance: Number(process.env.VIEWER_DISTANCE) || config.view?.browser?.viewDistance || 6,
+      firstPerson: config.view?.browser?.firstPerson !== false,
+      // The C++ eye viewer, shown inside the same page (key V) behind the dashboard token.
+      eyesUrl: viewEnabled ? (process.env.VIEWER_URL || viewConfig.url || `http://127.0.0.1:${Number(process.env.VIEW_HTTP_PORT) || viewConfig.httpPort || 8080}`) : null,
+      controls: {
+        busy: () => ['working', 'paused'].includes(aiAgent.getStatus().status),
+        input: (input, pressed) => manualControlSession.set(input, pressed),
+        action: (action, payload) => manualControlSession.performAction(action, payload),
+        release: () => manualControlSession.release(),
+        heartbeat: () => manualControlSession.heartbeat(),
+        look: (yaw, pitch) => (bot && botState.connected ? bot.look(yaw, pitch, true) : undefined),
+        chat: text => { if (bot && botState.connected) bot.chat(text); }
+      },
+      log: message => console.log(message)
+    })
+  : null;
+const browserViewerActive = Boolean(browserViewer && browserViewer.start());
+
 function hasDashboardAccess(req) {
   const expected = process.env.DASHBOARD_TOKEN;
   const provided = req.get('x-dashboard-token') || '';
@@ -265,6 +295,14 @@ function hasDashboardAccess(req) {
   const expectedBuffer = Buffer.from(expected);
   const providedBuffer = Buffer.from(provided);
   return expectedBuffer.length === providedBuffer.length &&
+    crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+}
+
+function secretsMatch(expected, provided) {
+  const expectedBuffer = Buffer.from(String(expected || ''));
+  const providedBuffer = Buffer.from(String(provided || ''));
+  return expectedBuffer.length > 0 &&
+    expectedBuffer.length === providedBuffer.length &&
     crypto.timingSafeEqual(expectedBuffer, providedBuffer);
 }
 
@@ -451,6 +489,27 @@ app.get('/', (req, res) => {
               <span class="control-status" id="view-status" aria-live="polite">Enter the dashboard token to view the protected POV.</span>
             </div>
           </div>
+          ${browserViewerActive ? `<div class="card">
+            <div class="label">3D view (bot's eyes)</div>
+            <p class="control-help">Enter the dashboard token below, then open the live first-person view. Use the controls under it to move the bot.</p>
+            <button class="control-key" type="button" id="open-3d-view">Open 3D view</button>
+            <button class="control-key" type="button" id="open-3d-full">Full screen (play with keyboard and mouse)</button>
+            <iframe id="view-3d" title="Bot 3D view" style="display:none;width:100%;aspect-ratio:16/9;height:auto;border:0;border-radius:8px;margin-top:8px;background:#000"></iframe>
+            <script>
+              document.getElementById('open-3d-view').addEventListener('click', function () {
+                var token = document.getElementById('dashboard-token').value;
+                if (!token) { alert('Enter the dashboard token first.'); return; }
+                var frame = document.getElementById('view-3d');
+                frame.src = location.protocol + '//' + location.hostname + ':${browserViewerPort}/watch?token=' + encodeURIComponent(token);
+                frame.style.display = 'block';
+              });
+              document.getElementById('open-3d-full').addEventListener('click', function () {
+                var token = document.getElementById('dashboard-token').value;
+                if (!token) { alert('Enter the dashboard token first.'); return; }
+                window.open(location.protocol + '//' + location.hostname + ':${browserViewerPort}/watch?token=' + encodeURIComponent(token), '_blank');
+              });
+            </script>
+          </div>` : ''}
           <div class="card">
             <div class="label">Manual bot controls</div>
             <p class="control-help">Use W/A/S/D to move, Space to jump, Shift to sneak, Ctrl to sprint. Press Q to drop held items, Left-Click to attack/mine, Right-Click to use/place, F to swap offhand, and 1-9 for hotbar slots.</p>
@@ -811,7 +870,7 @@ app.get('/', (req, res) => {
             btn.addEventListener('click', async () => {
               const dir = btn.dataset.aim;
               try {
-                const health = await fetch('/health');
+                const health = await fetch('/health', { headers: { 'x-dashboard-token': dashboardTokenInput.value } });
                 const hData = await health.json();
                 const coords = hData.coords || { x: 0, y: 64, z: 0 };
                 let target = { ...coords };
@@ -969,8 +1028,17 @@ app.get('/', (req, res) => {
           async function updateRadar() {
             if (!radarCtx) return;
             try {
-              const res = await fetch('/api/radar');
+              const res = await fetch('/api/radar', { headers: { 'x-dashboard-token': dashboardTokenInput.value } });
               const data = await res.json();
+              if (res.status === 401) {
+                radarCtx.clearRect(0, 0, 240, 240);
+                radarCtx.fillStyle = '#64748b';
+                radarCtx.font = '12px sans-serif';
+                radarCtx.textAlign = 'center';
+                radarCtx.fillText('Enter dashboard token', 120, 120);
+                if (radarSummary) radarSummary.innerText = 'Token required';
+                return;
+              }
               if (!data.connected) {
                 radarCtx.clearRect(0, 0, 240, 240);
                 radarCtx.fillStyle = '#64748b';
@@ -1181,7 +1249,7 @@ app.get('/health', (req, res) => {
     status: connected ? 'connected' : 'disconnected',
     serverOffline: Boolean(botState.serverOffline),
     uptime: Math.floor((Date.now() - botState.startTime) / 1000),
-    coords: (bot && bot.entity) ? bot.entity.position : null,
+    coords: (bot && bot.entity && hasDashboardAccess(req)) ? bot.entity.position : null,
     lastActivity: botState.lastActivity,
     lastDisconnectReason: botState.serverOffline
       ? '⚠️ Server is OFFLINE. Please turn on your server! (Bot will keep reconnecting automatically)'
@@ -1250,6 +1318,9 @@ app.get('/api/view/state', async (req, res) => {
 });
 
 app.get('/api/radar', (req, res) => {
+  if (!hasDashboardAccess(req)) {
+    return res.status(401).json({ error: 'Dashboard token required.' });
+  }
   if (!bot || !botState.connected || !bot.entity) {
     return res.json({
       connected: false,
@@ -1356,10 +1427,10 @@ app.post('/api/discord/chat', (req, res) => {
   const secretProvided = req.headers['x-discord-token'] || req.body?.token;
   const configuredSecret = process.env.DISCORD_RELAY_TOKEN || config.discord?.relaySecret;
 
-  if (configuredSecret && secretProvided !== configuredSecret) {
-    if (!hasDashboardAccess(req)) {
-      return res.status(401).json({ error: 'Unauthorized: invalid Discord relay token.' });
-    }
+  // Fail closed: with no relay secret configured, only a valid dashboard token is accepted.
+  const authorized = secretsMatch(configuredSecret, secretProvided) || hasDashboardAccess(req);
+  if (!authorized) {
+    return res.status(401).json({ error: 'Unauthorized: invalid Discord relay token.' });
   }
 
   const username = String(req.body?.username || 'DiscordUser').trim().slice(0, 32);
@@ -1487,7 +1558,7 @@ app.post('/api/agent/stop', (req, res) => {
 
 app.get('/ping', (req, res) => res.send('pong'));
 
-const server = app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, HOST, () => {
   console.log(`[Server] HTTP server started on port ${server.address().port}`);
 });
 
@@ -1495,7 +1566,7 @@ server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
     const fallbackPort = PORT + 1;
     console.log(`[Server] Port ${PORT} in use - trying port ${fallbackPort}`);
-    app.listen(fallbackPort, '0.0.0.0', () => {
+    app.listen(fallbackPort, HOST, () => {
       console.log(`[Server] HTTP server started on fallback port ${fallbackPort}`);
     });
   } else {
@@ -1766,6 +1837,7 @@ function createBot() {
 
       console.log(`[Bot] Spawned on server (version: ${bot.version})`);
       pluginLoader.onBotReady(bot);
+      if (browserViewerActive) browserViewer.attach(bot);
 
       if (config.discord?.events?.connect) {
         sendDiscordWebhook(`Connected to \`${config.server.ip}\``, 0x4ade80);
@@ -1888,6 +1960,7 @@ function createBot() {
       const disconnectReason = kickedReason || formatKickReason(reason);
       console.log(`[Bot] Disconnected: ${disconnectReason}`);
       pluginLoader.onBotEnd(bot);
+      if (browserViewerActive) browserViewer.detach();
       botState.connected = false;
       manualControlSession.disconnect();
       botState.lastDisconnectReason = disconnectReason;

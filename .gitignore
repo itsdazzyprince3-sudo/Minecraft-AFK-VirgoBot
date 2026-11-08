@@ -14,3 +14,4 @@ cpp/*.o
 data/ai-model-weights.json
 .aider*
 data/mc/
+test-results/

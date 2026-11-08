@@ -19,5 +19,9 @@
   },
   "devDependencies": {
     "eslint": "^10.8.1"
+  },
+  "optionalDependencies": {
+    "prismarine-viewer": "^1.33.0",
+    "canvas": "^3.2.3"
   }
 }
