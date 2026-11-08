@@ -103,9 +103,17 @@ default and it should only be enabled for trusted players.
 Virgo can inspect nearby blocks, entities, players, position, health, food, and
 inventory; navigate to visible players; gather resources; craft and smelt items;
 eat, farm, build a basic shelter, sleep, explore, and store or deliver items.
-It reasons from this structured game state and does not capture or render a
-first-person screen. It fights nearby hostile mobs when instructed or while
-surviving, retreats from creepers and low health, and does not attack players.
+It reasons primarily from structured game state. With `view.enabled` it also
+receives a software-rendered first-person reconstruction (real 26.x block
+textures when the local asset pack has been built, flat colors otherwise), and
+its reflex layer plays from that renderer's perception feed. The dashboard can
+show this reconstructed POV through token-protected `/api/view/*` proxy routes
+with F3-style telemetry: coordinates, facing, yaw/pitch, dimension, time,
+health/food, block/sky light, biome, renderer FPS, and perception clearance.
+This is not a capture of a real Minecraft client screen, and renderer FPS is
+not a Minecraft client FPS. It fights nearby hostile mobs when instructed or
+while surviving, retreats from creepers and low health, and does not attack
+players.
 Sleep is attempted only at night with a nearby or carried bed and no detected
 nearby hostile. Colored bed items are recognized. Death location and dimension
 are saved for recovery; recovery is refused across dimensions. Ordinary

@@ -54,12 +54,15 @@ Requires Python 3 + Pillow. Output:
 Without the assets the renderer falls back to the flat palette automatically,
 so `--selftest`/`--bench` still work on a bare checkout.
 
-Open `http://<host>:8080/` for the live view (MJPEG). Endpoints:
-
+The HTTP server binds to `127.0.0.1` by default; pass `--http-host 0.0.0.0`
+only if you understand that this view is unauthenticated. For remote access
+use the dashboard's token-protected `/api/view/*` proxy instead. Endpoints:
 - `/stream`     multipart MJPEG, live
 - `/frame`      single JPEG
 - `/frame.bmp`  24-bit BMP (the Node LLM layer reads this)
-- `/state`      fps, eye pose, perception summary
+- `/state`      text stats: fps, eye pose, perception summary
+- `/state.json` the same data as JSON, which the dashboard F3 overlay merges
+  with bot coordinates, facing, health/food, block light, and biome
 
 ## Protocol (v2)
 
