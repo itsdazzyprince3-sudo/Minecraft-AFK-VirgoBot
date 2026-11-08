@@ -450,6 +450,45 @@ The bot runs on Node.js and uses the same `npm start` command on each platform.
 Node.js 22 or newer is required; use a current Node.js LTS release when possible.
 Run the commands from the repository folder. Keep `settings.json` private.
 
+### Quick install (Linux/macOS Bash)
+
+The installer clones this repository into `~/Minecraft-AFK-VirgoBot`, installs
+the locked npm dependencies, and creates a private `settings.json` from the
+example. It does not start the bot. Review the installer in the repository
+before running it, then use:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/itsdazzyprince3-sudo/Minecraft-AFK-VirgoBot/main/install.sh | bash
+cd ~/Minecraft-AFK-VirgoBot
+nano settings.json
+npm start
+```
+
+To choose another install folder, set `MINECRAFT_AFK_BOT_DIR` before the curl
+command. The directory must not already exist. This script requires Git, npm,
+and Node.js 22 or newer; Termux users should follow the Termux instructions
+below instead.
+
+### Install from source with npm
+
+There is currently **no package published to the npm registry**, so
+`npm install @Minecraft-AFK-VirgoBot` is not a valid installation command
+(scoped npm packages also require the form `@scope/package`). To install with
+npm, clone the source repository and install its dependencies:
+
+```sh
+git clone https://github.com/itsdazzyprince3-sudo/Minecraft-AFK-VirgoBot.git
+cd Minecraft-AFK-VirgoBot
+npm install
+cp settings.example.json settings.json
+nano settings.json
+npm start
+```
+
+Use `npm ci` instead of `npm install` when you want the exact dependency
+versions from the committed lockfile, as the platform-specific instructions
+below do.
+
 ### Termux (Android)
 
 In the Termux app (install Termux from F-Droid or its official GitHub releases):
@@ -457,8 +496,8 @@ In the Termux app (install Termux from F-Droid or its official GitHub releases):
 ```sh
 pkg update
 pkg install nodejs-lts git
-git clone https://github.com/itsdazzyprince3-sudo/Aternos24-7-HostingBot.git
-cd Aternos24-7-HostingBot
+git clone https://github.com/itsdazzyprince3-sudo/Minecraft-AFK-VirgoBot.git
+cd Minecraft-AFK-VirgoBot
 cp settings.example.json settings.json
 nano settings.json
 npm ci
@@ -488,8 +527,8 @@ least 22 before installing the bot:
 ```sh
 apt update
 apt install -y git nodejs npm
-git clone https://github.com/itsdazzyprince3-sudo/Aternos24-7-HostingBot.git
-cd Aternos24-7-HostingBot
+git clone https://github.com/itsdazzyprince3-sudo/Minecraft-AFK-VirgoBot.git
+cd Minecraft-AFK-VirgoBot
 cp settings.example.json settings.json
 nano settings.json
 npm ci
