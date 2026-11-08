@@ -101,16 +101,34 @@ curl https://virgo-ai-<random>-11434.app.github.dev/api/chat \
   -d '{"model":"qwen2.5:1.5b","stream":false,"messages":[{"role":"user","content":"hello"}]}'
 ```
 
-## 5. Starting it again later
+## 5. Keeping it awake (best effort)
 
-Codespaces stop when idle, so the AI URL stops working. Restart with:
+GitHub resets the idle timer on **terminal input or output**, not on requests to
+a forwarded port. The devcontainer starts a detached tmux session that prints a
+tick every 45 seconds, which simulates terminal output:
+
+```sh
+scripts/codespace-keepalive.sh status   # check whether it is running
+scripts/codespace-keepalive.sh stop     # disable it
+scripts/codespace-keepalive.sh start    # enable it again
+```
+
+This is not an official GitHub feature. It usually prevents the idle stop, but
+GitHub can change the detection at any time, and it does **not** bypass the
+12-hour maximum lifetime or the monthly quota.
+
+## 6. Starting it again later
+
+Codespaces stop when idle or after 12 hours, so the AI URL stops working.
+Restart with:
 
 ```sh
 gh codespace start -c virgo-ai
 ```
 
-The devcontainer's `postStartCommand` starts Ollama automatically. The public
-port visibility may need to be set again after a restart:
+The devcontainer's `postStartCommand` starts Ollama and the keep-alive session
+automatically. The public port visibility may need to be set again after a
+restart:
 
 ```sh
 gh codespace ports visibility 11434:public -c virgo-ai
@@ -118,18 +136,20 @@ gh codespace ports visibility 11434:public -c virgo-ai
 
 ## Important limitations
 
-- **API traffic does not keep it awake.** GitHub defines inactivity as the
-  absence of user interaction. Only mouse/keyboard input or **terminal input or
-  output** resets the idle timer. Requests to the forwarded port alone do not
-  count. `scripts/codespace-ai.sh` writes Ollama's log to
-  `~/ollama-codespace.log`, which is not a terminal, so bot requests will not
-  prevent the idle stop.
+- **Best-effort keep-alive.** The tmux tick is a workaround, not a guarantee.
+  API traffic alone does not keep the Codespace alive.
 - **12-hour maximum lifetime.** Regardless of the idle timeout, a Codespace has
   a maximum lifetime of 12 hours. It must be started again after that.
 - **Free quota.** The free plan includes 120 core-hours per month. A 2-core
   Codespace therefore lasts at most about 60 hours of runtime per month
   (roughly 2.5 days if run continuously), so it cannot host AI 24/7.
-- **Not 24/7.** For always-on AI use a cloud API key or a small VPS.
+- **Public means public.** Anyone with the URL can query the model and consume
+  your quota. Treat the URL as a secret and delete the Codespace when done:
+  `gh codespace delete -c virgo-ai`.
+- **Model download is per Codespace.** Rebuilding or deleting the Codespace
+  downloads the ~1 GB model again.
+- **CPU only.** Free Codespaces have no GPU, so replies take seconds; the first
+  request after the model unloads can take ~30–60 seconds.
 
 ## If you need always-on AI
 
@@ -143,10 +163,3 @@ terminal without a Codespace:
 
 With a cloud key, local Ollama and the Codespace are not used at all, so nothing
 sleeps and no quota is consumed beyond the API's own limits.
-- **Public means public.** Anyone with the URL can query the model and consume
-  your quota. Treat the URL as a secret and delete the Codespace when done:
-  `gh codespace delete -c virgo-ai`.
-- **Model download is per Codespace.** Rebuilding or deleting the Codespace
-  downloads the ~1 GB model again.
-- **CPU only.** Free Codespaces have no GPU, so replies take seconds; the first
-  request after the model unloads can take ~30–60 seconds.

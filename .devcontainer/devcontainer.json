@@ -2,7 +2,7 @@
   "name": "Virgo Ollama AI",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
   "postCreateCommand": "bash scripts/codespace-ai.sh install",
-  "postStartCommand": "bash scripts/codespace-ai.sh start",
+  "postStartCommand": "bash scripts/codespace-ai.sh start; bash scripts/codespace-keepalive.sh start",
   "forwardPorts": [11434],
   "portsAttributes": {
     "11434": {
