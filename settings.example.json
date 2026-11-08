@@ -157,6 +157,15 @@
     "tickHz": 20,
     "threads": 8
   },
+  "screenCapture": {
+    "enabled": false,
+    "windowTitle": "Minecraft",
+    "fps": 5,
+    "maxWidth": 1280,
+    "controlWindow": false,
+    "controlDurationMs": 650,
+    "turnPixels": 130
+  },
   "vision": {
     "enabled": false,
     "reflex": true,

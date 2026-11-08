@@ -58,6 +58,29 @@ list. Examples: `!ai come`, `!ai follow me`, `!ai mine 8 stone`, `!ai craft
 wooden_pickaxe`, `!ai grind wood`, `!ai status`, `!ai teach keep three logs`,
 and `!ai stop`. Autonomous grinding remains off until explicitly enabled.
 
+### Real Minecraft window capture and desktop play (Linux/X11)
+
+The optional `screenCapture` mode captures the actual pixels of a visible
+Minecraft Java window with FFmpeg/X11 and shows refreshed frames in the
+token-protected dashboard POV panel. It is separate from the reconstructed
+Mineflayer viewer. On the same logged-in Linux desktop session, install
+`ffmpeg` and `xdotool`, start Minecraft, then set `screenCapture.enabled` to
+`true` and `screenCapture.windowTitle` to the visible window title (usually
+`Minecraft`). Start the bot from a terminal in that desktop session so
+`DISPLAY` and X11 permissions are available. The capture backend currently
+requires X11; native Wayland capture is not supported.
+
+To have the visual AI also play that real window, set
+`screenCapture.controlWindow` to `true`, install/run Ollama on the same machine
+and pull a vision model (for example, `ollama pull llava`). Desktop-control mode
+automatically enables the vision action loop and **does not log a second
+Mineflayer player into the server**. The existing Minecraft client must already
+be logged in and in the world. AI actions briefly send keyboard/mouse input to
+that window and bring it to the foreground, so do not use the PC at the same
+time; test first in a disposable world. Keep `controlWindow: false` to stream
+the real window without allowing the AI to control it. Configure a strong
+`DASHBOARD_TOKEN`; remote POV access is protected by it.
+
 The bot also builds a skill catalog from the installed Minecraft data: mining,
 crafting, smelting, equipping, hunting, breeding, and delivery entries for every
 block, item, mob, and recipe the version knows. Use `!ai skills <search>` to

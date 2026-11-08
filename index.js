@@ -23,6 +23,7 @@ const { installProtocolPacketCompatibility } = require('./lib/protocol-packet-co
 const pluginLoader = require('./lib/plugin-loader');
 const { FrameServer } = require('./lib/frame-server');
 const { VisionController } = require('./lib/vision-controller');
+const { LinuxScreenCapture } = require('./lib/linux-screen-capture');
 const { buildViewTelemetry, getLocalViewerUrl } = require('./lib/view-telemetry');
 const settingsPath = require('node:path').join(__dirname, 'settings.json');
 if (!fs.existsSync(settingsPath)) {
@@ -143,6 +144,27 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const viewEnabled = process.env.BOT_VIEW === '1' || config.view?.enabled === true;
 const viewConfig = config.view || {};
+const screenCaptureConfig = config.screenCapture || {};
+const screenCaptureEnabled = process.env.SCREEN_CAPTURE === '1' || screenCaptureConfig.enabled === true;
+const desktopControlEnabled = screenCaptureEnabled && screenCaptureConfig.controlWindow === true;
+const screenCapture = screenCaptureEnabled
+  ? new LinuxScreenCapture({
+      display: process.env.DISPLAY,
+      windowId: process.env.MINECRAFT_WINDOW_ID || screenCaptureConfig.windowId,
+      windowTitle: process.env.MINECRAFT_WINDOW_TITLE || screenCaptureConfig.windowTitle || 'Minecraft',
+      fps: Number(process.env.SCREEN_CAPTURE_FPS) || screenCaptureConfig.fps || 5,
+      maxWidth: screenCaptureConfig.maxWidth || 1280,
+      controlEnabled: desktopControlEnabled,
+      controlDurationMs: screenCaptureConfig.controlDurationMs || 650,
+      turnPixels: screenCaptureConfig.turnPixels || 130,
+      onLog: message => console.log(`[Screen] ${message}`)
+    })
+  : null;
+if (screenCapture) {
+  try { screenCapture.start(); } catch (error) {
+    console.error(`[Screen] Capture unavailable: ${error.message}`);
+  }
+}
 const viewFrameServer = viewEnabled
   ? new FrameServer({
       getBot: () => bot,
@@ -214,22 +236,24 @@ if (viewEnabled) startViewerProcess();
 function createVisionController() {
   return new VisionController({
     getBot: () => bot,
-    isConnected: () => botState.connected,
-    getPerception: viewFrameServer ? () => viewFrameServer.lastPerception : null,
+    isConnected: () => desktopControlEnabled ? Boolean(screenCapture?.status().ready) : botState.connected,
+    getPerception: viewFrameServer && !desktopControlEnabled ? () => viewFrameServer.lastPerception : null,
+    getJpegFrame: desktopControlEnabled ? () => screenCapture.getFrame() : null,
+    executeAction: desktopControlEnabled ? action => screenCapture.performAction(action) : null,
     viewerUrl: process.env.VIEWER_URL || viewConfig.url || 'http://127.0.0.1:8080',
     ollamaUrl: process.env.OLLAMA_URL || config.ai?.ollama?.url || 'http://127.0.0.1:11434/api/chat',
     model: process.env.VISION_MODEL || config.vision?.model || 'llava',
     intervalMs: Number(process.env.VISION_INTERVAL) || config.vision?.intervalMs || 4000,
     reflexHz: Number(process.env.VISION_REFLEX_HZ) || config.vision?.reflexHz || 10,
-    reflex: process.env.VISION_REFLEX !== '0' && config.vision?.reflex !== false,
-    llm: process.env.VISION_LLM === '1' || config.vision?.llm === true,
+    reflex: !screenCaptureEnabled && process.env.VISION_REFLEX !== '0' && config.vision?.reflex !== false,
+    llm: desktopControlEnabled || process.env.VISION_LLM === '1' || config.vision?.llm === true,
     dryRun: process.env.VISION_DRY === '1' || config.vision?.dryRun === true,
     enabled: true,
     onLog: (m) => console.log(`[Vision] ${m}`)
   });
 }
 let visionController = null;
-if (viewEnabled || config.vision?.enabled === true) {
+if (viewEnabled || config.vision?.enabled === true || desktopControlEnabled) {
   visionController = createVisionController();
   visionController.start();
 }
@@ -419,7 +443,7 @@ app.get('/', (req, res) => {
             <label for="dashboard-token">Dashboard control token</label>
             <input id="dashboard-token" type="password" autocomplete="off" placeholder="DASHBOARD_TOKEN">
             <div style="position:relative;background:#020617;min-height:180px;overflow:hidden;border-radius:8px;">
-              <img id="bot-view-frame" alt="Reconstructed live first-person view of the Minecraft bot" style="display:block;width:100%;min-height:180px;max-height:56vh;object-fit:contain;touch-action:none;user-select:none;cursor:crosshair;">
+              <img id="bot-view-frame" alt="${screenCaptureEnabled ? 'Live capture of the Minecraft desktop window' : 'Reconstructed live first-person view of the Minecraft bot'}" style="display:block;width:100%;min-height:180px;max-height:56vh;object-fit:contain;touch-action:none;user-select:none;cursor:crosshair;">
               <pre id="bot-view-f3" hidden style="position:absolute;top:8px;left:8px;right:8px;max-height:50vh;overflow:auto;margin:0;padding:8px;background:rgba(0,0,0,.78);color:#d1fae5;white-space:pre-wrap;font:12px/1.4 monospace;pointer-events:none;"></pre>
             </div>
             <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap;">
@@ -609,11 +633,21 @@ app.get('/', (req, res) => {
           const actionButtons = [...document.querySelectorAll('[data-action]')];
           const slotButtons = [...document.querySelectorAll('[data-slot]')];
           const aimButtons = [...document.querySelectorAll('[data-aim]')];
+          const screenCaptureEnabledForUI = ${JSON.stringify(screenCaptureEnabled)};
+          const desktopControlEnabledForUI = ${JSON.stringify(desktopControlEnabled)};
           const allInteractiveButtons = [...controlButtons, ...actionButtons, ...slotButtons, ...aimButtons];
+          if (desktopControlEnabledForUI) {
+            allInteractiveButtons.forEach(button => { button.disabled = true; });
+            controlStatus.innerText = 'The vision agent controls the focused Minecraft window; dashboard Mineflayer controls are disabled.';
+          }
           const viewFrame = document.getElementById('bot-view-frame');
           const viewStatus = document.getElementById('view-status');
           const f3Panel = document.getElementById('bot-view-f3');
           const f3Button = document.getElementById('toggle-f3');
+          if (screenCaptureEnabledForUI) {
+            f3Panel.hidden = true;
+            f3Button.hidden = true;
+          }
           let currentViewState = null;
           let currentFrameUrl = null;
           let viewTimer = null;
@@ -691,9 +725,13 @@ app.get('/', (req, res) => {
                     viewFrame.onerror = null;
                   };
                   viewFrame.src = nextUrl;
-                  viewStatus.innerText = 'Live reconstructed POV. Drag to look; click to attack/use.';
+                  viewStatus.innerText = screenCaptureEnabledForUI
+                    ? (desktopControlEnabledForUI
+                      ? 'Live capture of the real Minecraft window. Vision AI may control this window; it will take keyboard/mouse focus.'
+                      : 'Live capture of the real Minecraft window. Desktop input control is off.')
+                    : 'Live reconstructed POV. Drag to look; click to attack/use.';
                 }
-                if (Date.now() - lastStateAt > 900) {
+                if (!screenCaptureEnabledForUI && Date.now() - lastStateAt > 900) {
                   currentViewState = await aiRequest('/api/view/state');
                   f3Panel.textContent = formatViewTelemetry(currentViewState);
                   lastStateAt = Date.now();
@@ -711,6 +749,7 @@ app.get('/', (req, res) => {
           f3Button.addEventListener('click', toggleF3);
           viewFrame.addEventListener('contextmenu', event => event.preventDefault());
           viewFrame.addEventListener('pointerdown', event => {
+            if (screenCaptureEnabledForUI) return;
             if (!dashboardTokenInput.value || !currentViewState || (event.button !== 0 && event.button !== 2)) return;
             event.preventDefault();
             viewFrame.setPointerCapture(event.pointerId);
@@ -723,6 +762,7 @@ app.get('/', (req, res) => {
             };
           });
           viewFrame.addEventListener('pointermove', event => {
+            if (screenCaptureEnabledForUI) return;
             if (!viewDrag || viewDrag.pointerId !== event.pointerId) return;
             const dx = event.clientX - viewDrag.x;
             const dy = event.clientY - viewDrag.y;
@@ -736,6 +776,7 @@ app.get('/', (req, res) => {
             });
           });
           viewFrame.addEventListener('pointerup', event => {
+            if (screenCaptureEnabledForUI) return;
             if (!viewDrag || viewDrag.pointerId !== event.pointerId) return;
             const drag = viewDrag;
             viewDrag = null;
@@ -752,6 +793,7 @@ app.get('/', (req, res) => {
           });
           viewFrame.addEventListener('pointercancel', () => { viewDrag = null; });
           viewFrame.addEventListener('wheel', event => {
+            if (screenCaptureEnabledForUI) return;
             if (!dashboardTokenInput.value || !currentViewState) return;
             event.preventDefault();
             const current = Number(currentViewState.quickBarSlot) || 0;
@@ -1134,8 +1176,9 @@ app.get('/tutorial', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
+  const connected = desktopControlEnabled ? Boolean(screenCapture?.status().ready) : botState.connected;
   res.json({
-    status: botState.connected ? 'connected' : 'disconnected',
+    status: connected ? 'connected' : 'disconnected',
     serverOffline: Boolean(botState.serverOffline),
     uptime: Math.floor((Date.now() - botState.startTime) / 1000),
     coords: (bot && bot.entity) ? bot.entity.position : null,
@@ -1152,6 +1195,14 @@ app.get('/api/view/frame', async (req, res) => {
   if (!hasDashboardAccess(req)) {
     return res.status(process.env.DASHBOARD_TOKEN ? 401 : 503)
       .json({ error: 'A valid DASHBOARD_TOKEN is required.' });
+  }
+  if (screenCapture) {
+    try {
+      const image = screenCapture.getFrame();
+      return res.set('Cache-Control', 'no-store').type('image/jpeg').send(image);
+    } catch (error) {
+      return res.status(503).json({ error: `Real Minecraft-window capture unavailable: ${error.message}` });
+    }
   }
   if (!viewEnabled || !viewFrameServer || !botState.connected) {
     return res.status(503).json({ error: 'Live POV is disabled or the Minecraft bot is disconnected.' });
@@ -2627,6 +2678,7 @@ function shutdown(signal) {
   try { if (visionController) visionController.stop(); } catch { /* ignore */ }
   try { if (viewFrameServer) viewFrameServer.stop(); } catch { /* ignore */ }
   try { if (viewerProcess) { viewerProcess.kill(); viewerProcess = null; } } catch { /* ignore */ }
+  try { if (screenCapture) screenCapture.stop(); } catch { /* ignore */ }
   if (bot) {
     try {
       manualControlSession.release();
@@ -2708,4 +2760,8 @@ console.log(`Bot Username:   ${process.env.BOT_USERNAME || config['bot-account']
 console.log(`Auto-Reconnect: ${config.utils['auto-reconnect'] ? 'Enabled' : 'Disabled'}`);
 console.log('='.repeat(50));
 
-createBot();
+if (desktopControlEnabled) {
+  console.log('[Screen] Desktop-control mode is active. The existing Minecraft window is the game client; no Mineflayer protocol login will be created.');
+} else {
+  createBot();
+}
