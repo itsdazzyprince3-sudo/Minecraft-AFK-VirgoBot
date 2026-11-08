@@ -145,6 +145,15 @@ const browserViewer = browserViewerEnabled
       token: process.env.DASHBOARD_TOKEN,
       viewDistance: Number(process.env.VIEWER_DISTANCE) || config.view?.browser?.viewDistance || 6,
       firstPerson: config.view?.browser?.firstPerson !== false,
+      controls: {
+        busy: () => ['working', 'paused'].includes(aiAgent.getStatus().status),
+        input: (input, pressed) => manualControlSession.set(input, pressed),
+        action: (action, payload) => manualControlSession.performAction(action, payload),
+        release: () => manualControlSession.release(),
+        heartbeat: () => manualControlSession.heartbeat(),
+        look: (yaw, pitch) => (bot && botState.connected ? bot.look(yaw, pitch, true) : undefined),
+        chat: text => { if (bot && botState.connected) bot.chat(text); }
+      },
       log: message => console.log(message)
     })
   : null;
@@ -341,6 +350,7 @@ app.get('/', (req, res) => {
             <div class="label">3D view (bot's eyes)</div>
             <p class="control-help">Enter the dashboard token below, then open the live first-person view. Use the controls under it to move the bot.</p>
             <button class="control-key" type="button" id="open-3d-view">Open 3D view</button>
+            <button class="control-key" type="button" id="open-3d-full">Full screen (play with keyboard and mouse)</button>
             <iframe id="view-3d" title="Bot 3D view" style="display:none;width:100%;aspect-ratio:16/9;height:auto;border:0;border-radius:8px;margin-top:8px;background:#000"></iframe>
             <script>
               document.getElementById('open-3d-view').addEventListener('click', function () {
@@ -349,6 +359,11 @@ app.get('/', (req, res) => {
                 var frame = document.getElementById('view-3d');
                 frame.src = location.protocol + '//' + location.hostname + ':${browserViewerPort}/watch?token=' + encodeURIComponent(token);
                 frame.style.display = 'block';
+              });
+              document.getElementById('open-3d-full').addEventListener('click', function () {
+                var token = document.getElementById('dashboard-token').value;
+                if (!token) { alert('Enter the dashboard token first.'); return; }
+                window.open(location.protocol + '//' + location.hostname + ':${browserViewerPort}/watch?token=' + encodeURIComponent(token), '_blank');
               });
             </script>
           </div>` : ''}
