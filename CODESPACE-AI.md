@@ -118,11 +118,31 @@ gh codespace ports visibility 11434:public -c virgo-ai
 
 ## Important limitations
 
-- **Not 24/7.** Codespaces stop after the idle timeout (maximum 240 minutes).
-  Traffic to the forwarded port does not count as activity. If the bot must have
-  AI around the clock, use a small VPS or a cloud API key instead.
-- **Free quota.** The free plan includes limited core-hours and storage per
-  month. A 2-core Codespace uses roughly 2 core-hours per hour it runs.
+- **API traffic does not keep it awake.** GitHub defines inactivity as the
+  absence of user interaction. Only mouse/keyboard input or **terminal input or
+  output** resets the idle timer. Requests to the forwarded port alone do not
+  count. `scripts/codespace-ai.sh` writes Ollama's log to
+  `~/ollama-codespace.log`, which is not a terminal, so bot requests will not
+  prevent the idle stop.
+- **12-hour maximum lifetime.** Regardless of the idle timeout, a Codespace has
+  a maximum lifetime of 12 hours. It must be started again after that.
+- **Free quota.** The free plan includes 120 core-hours per month. A 2-core
+  Codespace therefore lasts at most about 60 hours of runtime per month
+  (roughly 2.5 days if run continuously), so it cannot host AI 24/7.
+- **Not 24/7.** For always-on AI use a cloud API key or a small VPS.
+
+## If you need always-on AI
+
+The bot already supports cloud providers, and they work from any phone or
+terminal without a Codespace:
+
+- **Gemini:** set `AI_API_KEY` in `.env` and leave `ai.provider` as `"auto"`.
+- **Any OpenAI-compatible API** (OpenRouter, Groq, etc.): set
+  `AI_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_API_URL`, and `OPENAI_MODEL`
+  in `.env`.
+
+With a cloud key, local Ollama and the Codespace are not used at all, so nothing
+sleeps and no quota is consumed beyond the API's own limits.
 - **Public means public.** Anyone with the URL can query the model and consume
   your quota. Treat the URL as a secret and delete the Codespace when done:
   `gh codespace delete -c virgo-ai`.
