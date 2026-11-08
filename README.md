@@ -44,7 +44,19 @@ card: enter the token, press **Open 3D view**, and a first-person view of the bo
 world appears next to the movement controls, with a Minecraft-style HUD drawn on top
 (hearts, hunger, XP, hotbar with item icons, crosshair, coordinates and recent chat).
 The HUD uses the game's own sprites and font; the standalone page is at
-`http://127.0.0.1:3007/watch?token=...`. It uses `prismarine-viewer` and the
+`http://127.0.0.1:3007/watch?token=...` (the dashboard's **Full screen** button opens it).
+
+**Play from the browser.** On that page, click the view to take control: `WASD` move, mouse
+looks (pointer lock), `Space` jump, `Shift` sneak, `Ctrl` sprint, `1`-`9` hotbar, left click
+attacks, right click uses, `Q` drops, `F` swaps hands, `T` opens a chat box, `Esc` releases the
+mouse. It uses the bot's existing manual-control system, so patrol and anti-AFK pause while you
+drive, and keys are released if the page closes or stops sending heartbeats. It refuses while an
+AI task is running.
+
+**Speed.** The 3D view is drawn by your own browser's GPU, not streamed as video, so its frame
+rate follows your device (up to your screen's refresh rate); only small position updates cross
+the network. The top-right readout shows the real render fps and the round-trip ping. Mouse
+look has one network round trip of latency. Lower `VIEWER_DISTANCE` (default 6) on weak phones. It uses `prismarine-viewer` and the
 native `canvas` package, both optional; install them with
 `npm install prismarine-viewer canvas` if `npm install` skipped them.
 
