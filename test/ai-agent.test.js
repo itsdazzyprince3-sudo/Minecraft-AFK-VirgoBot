@@ -888,7 +888,11 @@ test('item delivery is limited to the trusted requester', async () => {
   };
   const bot = {
     entity: { position: new Vec3(0, 64, 0) },
-    players: { Virgo: recipient, OtherPlayer: { username: 'OtherPlayer', entity: recipient.entity } },
+    players: {
+      Virgo: recipient,
+      OtherPlayer: { username: 'OtherPlayer', entity: recipient.entity },
+      Tarun: { username: 'Tarun', entity: recipient.entity }
+    },
     registry: { itemsByName: { oak_log: { id: 1 } } },
     inventory: { items: () => [{ name: 'oak_log', count: 5 }] },
     pathfinder: { goto: async () => {} },
@@ -905,6 +909,10 @@ test('item delivery is limited to the trusted requester', async () => {
   const result = await agent.executeTool('deliver_item', JSON.stringify({ item: 'oak_log', count: 2 }));
   assert.deepEqual(result, { delivered: 'oak_log', count: 2, recipient: 'Virgo' });
   assert.deepEqual(tossed, [[1, null, 2]]);
+
+  const namedResult = await agent.executeTool('deliver_item', JSON.stringify({ item: 'oak_log', count: 1, recipient: 'Tarun' }));
+  assert.deepEqual(namedResult, { delivered: 'oak_log', count: 1, recipient: 'Tarun' });
+  assert.deepEqual(tossed[1], [1, null, 1]);
 
   agent.requestedBy = null;
   await assert.rejects(

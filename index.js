@@ -1563,13 +1563,18 @@ app.get('/ping', (req, res) => res.send('pong'));
 const server = app.listen(PORT, HOST, () => {
   console.log(`[Server] HTTP server started on port ${server.address().port}`);
 });
+const httpServers = new Set([server]);
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
     const fallbackPort = PORT + 1;
     console.log(`[Server] Port ${PORT} in use - trying port ${fallbackPort}`);
-    app.listen(fallbackPort, HOST, () => {
+    const fallbackServer = app.listen(fallbackPort, HOST, () => {
       console.log(`[Server] HTTP server started on fallback port ${fallbackPort}`);
+    });
+    httpServers.add(fallbackServer);
+    fallbackServer.on('error', fallbackError => {
+      console.log(`[Server] HTTP fallback server error: ${fallbackError.message}`);
     });
   } else {
     console.log(`[Server] HTTP server error: ${err.message}`);
@@ -2841,7 +2846,19 @@ function shutdown(signal) {
   } catch (e) {
     // ignore cleanup errors
   }
-  server.close(() => process.exit(0));
+  const listeningServers = [...httpServers].filter(httpServer => httpServer.listening);
+  if (listeningServers.length === 0) {
+    process.exit(0);
+    return;
+  }
+  let serversToClose = listeningServers.length;
+  for (const httpServer of listeningServers) {
+    httpServer.close(error => {
+      if (error) console.log(`[Server] HTTP shutdown warning: ${error.message}`);
+      serversToClose -= 1;
+      if (serversToClose === 0) process.exit(0);
+    });
+  }
   setTimeout(() => process.exit(0), 5000).unref();
 }
 
