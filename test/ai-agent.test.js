@@ -175,7 +175,7 @@ test('autonomous tasks cannot use non-gathering tools or mine unapproved blocks'
 
 test('autonomous mining never exceeds the per-cycle block limit', async () => {
   const bot = {
-    registry: { blocksByName: { stone: { id: 1 } } },
+    registry: { blocksByName: { oak_log: { id: 1 } } },
     inventory: { items: () => [] }
   };
   const agent = new AIAgent({
@@ -185,15 +185,15 @@ test('autonomous mining never exceeds the per-cycle block limit', async () => {
   });
   agent.isAutonomousTask = true;
   agent.autonomousBlocksMined = 24;
-  const result = await agent.mineBlock(bot, { block: 'stone', count: 8 });
+  const result = await agent.mineBlock(bot, { block: 'oak_log', count: 8 });
   assert.equal(result.mined, 0);
   assert.match(result.message, /block limit/);
 });
 
-test('autonomous mining accepts exposed blocks but rejects blocks under a roof', () => {
+test('autonomous mining accepts exposed tree logs near leaves but rejects blocks under a roof', () => {
   const targetPosition = new Vec3(0, 0, 0);
   const target = {
-    name: 'stone',
+    name: 'oak_log',
     id: 1,
     position: targetPosition,
     diggable: true
@@ -205,7 +205,7 @@ test('autonomous mining accepts exposed blocks but rejects blocks under a roof',
     entities: {},
     pathfinder: { bestHarvestTool: () => ({ name: 'iron_pickaxe' }) },
     findBlocks: options => {
-      if (options.point) return [];
+      if (options.point) return options.matching({ name: 'oak_leaves' }) ? [new Vec3(1, 0, 0)] : [];
       return [targetPosition];
     },
     blockAt: position => {
@@ -223,6 +223,50 @@ test('autonomous mining accepts exposed blocks but rejects blocks under a roof',
   assert.equal(agent.findSafeAutonomousBlock(bot, 1), target);
   roofHeight = 8;
   assert.equal(agent.findSafeAutonomousBlock(bot, 1), null);
+});
+
+test('AI mining protects doors and blocks near obvious player-structure markers', () => {
+  const doorPosition = new Vec3(2, 64, 0);
+  const bot = {
+    findBlocks: options => options.point.distanceTo(doorPosition) <= 5 && options.matching({ name: 'oak_door' }) ? [doorPosition] : [],
+    blockAt: position => position === doorPosition ? { name: 'oak_door' } : { name: 'stone' }
+  };
+  const agent = new AIAgent({ config: { enabled: true }, getBot: () => bot, isConnected: () => true });
+
+  assert.equal(agent.isProtectedBlock('oak_door'), true);
+  assert.equal(agent.isProtectedBlock('oak_fence_gate'), true);
+  assert.equal(agent.isNearProtectedStructure(bot, new Vec3(3, 64, 0)), true);
+  assert.equal(agent.isNearProtectedStructure(bot, new Vec3(20, 64, 0)), false);
+});
+
+test('direct Groq conversation preserves an active gameplay task and stores private per-player context', async () => {
+  const previousKey = process.env.GROQ_API_KEY;
+  process.env.GROQ_API_KEY = 'test-groq-key';
+  const requests = [];
+  const agent = new AIAgent({
+    config: { enabled: true, provider: 'groq', groq: { model: 'test-qwen', apiUrl: 'https://example.test/chat' } },
+    getBot: () => ({}),
+    isConnected: () => true,
+    memory: noOpMemory,
+    fetchImpl: async (url, options) => {
+      requests.push({ url, body: JSON.parse(options.body) });
+      return { ok: true, json: async () => ({ choices: [{ message: { content: 'Doing well! How is your world going?' } }] }) };
+    }
+  });
+  agent.state = { ...agent.state, status: 'working', instruction: 'mine wood' };
+  agent.autonomyActive = true;
+  try {
+    assert.equal(agent.supportsIndependentChat(), true);
+    assert.equal(await agent.replyToChat('how are you?', 'Virgo'), 'Doing well! How is your world going?');
+    assert.equal(agent.getStatus().status, 'working');
+    assert.equal(agent.autonomyActive, true);
+    assert.equal(requests[0].url, 'https://example.test/chat');
+    assert.equal(requests[0].body.model, 'test-qwen');
+    assert.deepEqual(agent.chatHistories.get('virgo').map(message => message.role), ['user', 'assistant']);
+  } finally {
+    if (previousKey === undefined) delete process.env.GROQ_API_KEY;
+    else process.env.GROQ_API_KEY = previousKey;
+  }
 });
 
 test('AI task uses the configured model API and can finish a task', async () => {

@@ -44,6 +44,7 @@
   },
   "movement": {
     "enabled": true,
+    "canOpenDoors": true,
     "circle-walk": {
       "enabled": true,
       "radius": 4,
@@ -69,6 +70,7 @@
     "enabled": true,
     "allowedUsers": ["YOUR_MINECRAFT_USERNAME"],
     "respondToTrustedChat": true,
+    "respondToAllChat": true,
     "memory": true,
     "memoryMaxNotes": 100,
     "learnFromAllowlistedChat": false,

@@ -29,6 +29,8 @@ test('local intent parser maps common Minecraft chat tasks to bounded skills', (
   assert.deepEqual(parseLocalIntent('craft wooden_pickaxe'), {
     type: 'craft', item: 'wooden_pickaxe', count: 1, raw: 'craft wooden_pickaxe'
   });
+  assert.deepEqual(parseLocalIntent('open the door'), { type: 'use', target: 'door', raw: 'open the door' });
+  assert.equal(parseLocalIntent('use nearest gate').target, 'door');
   assert.equal(parseLocalIntent('follow me').type, 'follow');
   assert.deepEqual(parseLocalIntent('grind wood').goal, 'wood');
   assert.equal(planForIntent(parseLocalIntent('come'))[0].skill, 'comeToPlayer');

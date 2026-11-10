@@ -913,12 +913,15 @@ from `settings.example.json`:
 | Key | Default | What changing it does |
 |-----|---------|-----------------------|
 | `ai.enabled` | `true` | Enables instruction-driven AI behavior. Leave on for natural AI chat and task commands. |
-| `ai.allowedUsers` | placeholder username | Replace `YOUR_MINECRAFT_USERNAME` with your own name; only trusted users can use AI chat. |
-| `ai.respondToTrustedChat` | `true` | Lets the AI answer ordinary messages from the allowlist; outsiders remain unauthorized. |
-| `ai.autonomous.enabled` | `false` | Turns on periodic autonomous gathering. Keep off unless you want the bot to choose tasks by itself. |
+| `ai.allowedUsers` | placeholder username | Replace `YOUR_MINECRAFT_USERNAME` with your own name; only trusted users can issue gameplay tasks and AI control commands. |
+| `ai.respondToTrustedChat` | `true` | Lets allowlisted players talk naturally without `!ai`. Missing older keys default to on unless explicitly set to `false`. |
+| `ai.respondToAllChat` | `true` | Lets any player receive AI conversation replies. Public chat uses the model/API quota and is globally rate-limited; it does not grant gameplay commands. Anyone may ask the bot to follow only themselves for a short, bounded time. |
+| `ai.autonomous.enabled` | `false` | Turns on periodic autonomous behavior. Autonomous mining is limited to exposed tree logs with nearby leaves; doors and blocks near obvious build markers are protected. |
 | `utils.auto-reconnect` | `true` | Reconnects after the server or network drops. Usually leave on. |
 | `utils.auto-auth.enabled` | `false` | Use only if your server has an AuthMe-like login plugin; its password is private. |
 | `movement.circle-walk.enabled` | `true` | Patrols around the bot's spawn position when the AFK movement module is active. |
+| `movement.canOpenDoors` | `true` | Lets pathfinding try to use doors and fence gates while navigating; server/version support can vary. |
+| `movement.random-jump.enabled` | `true` | The AFK jump timer is skipped while AI is enabled so it cannot fight AI movement. |
 | `modules.combat` | `true` | Allows the AFK module to attack nearby mobs. |
 | `modules.avoidMobs` | `true` | Runs only when `modules.combat` is `false`; with the sample's combat setting, this avoidance module is skipped. |
 | `view.enabled` | `false` | Starts the optional reconstructed world viewer; it is not a real desktop capture. |

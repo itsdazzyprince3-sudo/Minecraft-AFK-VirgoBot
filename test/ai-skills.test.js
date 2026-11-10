@@ -121,7 +121,7 @@ test('wood gathering fails honestly when log blocks break but no log items enter
     entity: { position: new Vec3(0, 64, 0), equipment: [] },
     inventory: { items: () => [] },
     registry: { blocksByName: { oak_log: { id: 1 } } },
-    findBlocks: () => (++scans === 1 ? [logPosition] : []),
+    findBlocks: options => options.point ? [] : (++scans === 1 ? [logPosition] : []),
     blockAt: position => position.y < 64
       ? { name: 'dirt', position }
       : { name: 'oak_log', position, diggable: true },
@@ -299,6 +299,75 @@ test('skills execute drop, look, hotbar slot, swing, and use actions', async () 
   const lookRes = await skills.lookAtTarget('up');
   assert.match(lookRes.message, /Looking straight up/);
   assert.equal(log[4][0], 'look');
+});
+
+test('door use navigates to the nearest door and activates it without breaking it', async () => {
+  const door = { name: 'oak_door', position: new Vec3(3, 64, 0) };
+  let activated = null;
+  let destination = null;
+  const bot = {
+    entity: { position: new Vec3(0, 64, 0) },
+    inventory: { items: () => [] },
+    findBlock: options => options.matching(door) ? door : null,
+    blockAt: () => door,
+    lookAt: async () => {},
+    activateBlock: async block => { activated = block; }
+  };
+  const skills = makeSkills(bot);
+  skills.goto = async goal => { destination = goal; };
+
+  const result = await skills.useHeldItem('door');
+  assert.equal(activated, door);
+  assert.equal(destination.x, 3);
+  assert.match(result.message, /used the oak door/i);
+});
+
+test('local mining guard recognizes interactable home blocks and nearby build markers', () => {
+  const markerPosition = new Vec3(2, 64, 0);
+  const bot = {
+    findBlocks: options => options.point.distanceTo(markerPosition) <= 5 && options.matching({ name: 'oak_door' })
+      ? [markerPosition]
+      : [],
+    blockAt: () => ({ name: 'oak_door' })
+  };
+  const skills = makeSkills(bot);
+  assert.equal(skills.isProtectedMiningTarget(bot, { name: 'oak_door', position: markerPosition }), true);
+  assert.equal(skills.isProtectedMiningTarget(bot, { name: 'stone', position: new Vec3(3, 64, 0) }), true);
+  assert.equal(skills.isProtectedMiningTarget(bot, { name: 'stone', position: new Vec3(20, 64, 0) }), false);
+});
+
+test('autonomous mining is restricted to tree logs in the deterministic skill layer', async () => {
+  const bot = { registry: { blocksByName: { stone: { id: 1 } } } };
+  const skills = new AISkills({
+    agent: { runId: 1, isAutonomousTask: true },
+    getBot: () => bot,
+    memory: null,
+    runId: 1
+  });
+  await assert.rejects(skills.mine('stone'), /restricted to natural tree logs/i);
+});
+
+test('follow refuses distant players and stops immediately at critical health', async () => {
+  let goalSet = false;
+  let stopped = false;
+  const target = { position: new Vec3(100, 64, 0) };
+  const bot = {
+    entity: { position: new Vec3(0, 64, 0) },
+    health: 5,
+    players: { virgo: { entity: { position: new Vec3(2, 64, 0) } } },
+    entities: {},
+    pathfinder: { setGoal: () => { goalSet = true; }, stop: () => { stopped = true; } }
+  };
+  const skills = makeSkills(bot);
+  bot.players.virgo.entity = target;
+  await assert.rejects(skills.followPlayer(), /within 64 blocks/i);
+  assert.equal(goalSet, false);
+
+  bot.players.virgo.entity = { position: new Vec3(2, 64, 0) };
+  const result = await skills.followPlayer();
+  assert.match(result.message, /health is low/i);
+  assert.equal(goalSet, true);
+  assert.equal(stopped, true);
 });
 
 test('sortChests deposits surplus materials while preserving tools and primary food', async () => {

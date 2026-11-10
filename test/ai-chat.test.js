@@ -6,6 +6,7 @@ const { MAX_MEMORY_NOTE_LENGTH } = require('../lib/ai-memory');
 const {
   createTrustedChatMemoryNote,
   getAIChatAllowedUsers,
+  isPublicFollowRequest,
   isAIChatAuthorized,
   parseAIChatCommand,
   shouldAutoRespondToChat
@@ -59,7 +60,7 @@ test('AI command allowlist merges AI-specific and existing trusted chat users', 
   assert.deepEqual(getAIChatAllowedUsers({ allowedUsers: 'virgo' }, null), []);
 });
 
-test('automatic AI chat replies require opt-in and an AI-specific allowed user', () => {
+test('automatic AI chat replies honor the allowlist and explicit opt-out', () => {
   const config = { enabled: true, respondToTrustedChat: true, allowedUsers: ['commotozze'] };
   assert.equal(shouldAutoRespondToChat('commotozze', config), true);
   assert.equal(shouldAutoRespondToChat('other', config), false);
@@ -68,6 +69,18 @@ test('automatic AI chat replies require opt-in and an AI-specific allowed user',
   assert.equal(shouldAutoRespondToChat('stranger', config, ['commotozze', 'owner']), false);
   assert.equal(shouldAutoRespondToChat('commotozze', { ...config, enabled: false }), false);
   assert.equal(shouldAutoRespondToChat('commotozze', { ...config, respondToTrustedChat: false }), false);
+});
+
+test('allowlisted users can start normal conversation without a prefix by default', () => {
+  assert.equal(shouldAutoRespondToChat('Virgo', { enabled: true, allowedUsers: ['virgo'] }), true);
+  assert.equal(shouldAutoRespondToChat('stranger', { enabled: true, allowedUsers: ['virgo'] }), false);
+  assert.equal(shouldAutoRespondToChat('Virgo', { enabled: true, allowedUsers: ['virgo'], respondToChat: false }), false);
+});
+
+test('public follow requests can only target the speaker themself', () => {
+  assert.equal(isPublicFollowRequest('follow'), true);
+  assert.equal(isPublicFollowRequest('please follow me!'), true);
+  assert.equal(isPublicFollowRequest('follow someoneElse'), false);
 });
 
 test('trusted chat memory includes only allowlisted players and bounds note length', () => {

@@ -11,6 +11,7 @@ const { AIAgent } = require('./lib/ai-agent');
 const {
   createTrustedChatMemoryNote,
   getAIChatAllowedUsers,
+  isPublicFollowRequest,
   isAIChatAuthorized,
   parseAIChatCommand,
   shouldAutoRespondToChat
@@ -120,7 +121,7 @@ function sendAIChatMessage(message) {
   if (!bot || !botState.connected) return;
   const text = String(message).replace(/[\r\n\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200);
   if (!text) return;
-  enqueueSafeChat(`[${bot.username || 'Virgo'}] ${text}`);
+  enqueueSafeChat(text);
 }
 
 const aiAgent = new AIAgent({
@@ -132,7 +133,7 @@ const aiAgent = new AIAgent({
     const response = status.status === 'error'
       ? `I couldn't complete that: ${status.message}`
       : status.message;
-    sendAIChatMessage(`${requester}: ${response}`);
+    sendAIChatMessage(response);
   },
   onProgress: (message, requester, { autonomous } = {}) => {
     if (!requester || autonomous || config.ai?.chatProgress === false || config.ai?.autonomous?.chatProgress === false) return;
@@ -1848,6 +1849,7 @@ function createBot() {
       const defaultMove = new Movements(bot, mcData);
       defaultMove.allowFreeMotion = false;
       defaultMove.canDig = true;
+      defaultMove.canOpenDoors = config.movement?.canOpenDoors !== false;
       defaultMove.digCost = 15;
       defaultMove.maxDropDown = 4;
       defaultMove.liquidCost = 1000;
@@ -2270,7 +2272,7 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
       startCircleWalk(bot, defaultMove);
     }
 
-    if (config.movement?.['random-jump']?.enabled && !(config.movement?.['circle-walk']?.enabled)) {
+    if (config.movement?.['random-jump']?.enabled && !config.ai?.enabled && !(config.movement?.['circle-walk']?.enabled)) {
       startRandomJump(bot);
     }
     if (config.movement?.['look-around']?.enabled) {
@@ -2504,6 +2506,15 @@ function chatModule(bot) {
 
   const aiAllowedUsers = getAIChatAllowedUsers(config.ai, config.chat);
   const lastAutoResponseAt = new Map();
+  let lastPublicReplyAt = 0;
+  const allowPublicRequest = (username, now = Date.now()) => {
+    const key = String(username || '').toLowerCase();
+    const last = lastAutoResponseAt.get(key) || 0;
+    if (now - last < 2000 || now - lastPublicReplyAt < 2500) return false;
+    lastAutoResponseAt.set(key, now);
+    lastPublicReplyAt = now;
+    return true;
+  };
 
   bot.on('chat', (username, message) => {
     if (!bot || username === bot.username) return;
@@ -2527,6 +2538,25 @@ function chatModule(bot) {
           return;
         }
         if (!isAIChatAuthorized(username, aiAllowedUsers)) {
+          const publicText = aiCommand.type === 'task' ? aiCommand.text : '';
+          if (config.ai?.respondToAllChat !== false && isPublicFollowRequest(publicText)) {
+            if (!allowPublicRequest(username)) return;
+            try { aiAgent.start('follow me', username); }
+            catch (error) { sendAIChatMessage(error.message); }
+            return;
+          }
+          const publicIntent = publicText ? parseLocalIntent(publicText) : null;
+          if (config.ai?.respondToAllChat !== false && aiCommand.type === 'task' &&
+            (publicIntent?.type === 'chat' || publicIntent?.intent === 'question')) {
+            if (!allowPublicRequest(username)) return;
+            if (aiAgent.supportsIndependentChat()) {
+              void aiAgent.replyToChat(publicText, username).then(reply => sendAIChatMessage(reply))
+                .catch(error => sendAIChatMessage(`I couldn't reply right now: ${error.message}`));
+            } else {
+              sendAIChatMessage('I cannot answer public chat right now because no independent chat model is configured.');
+            }
+            return;
+          }
           console.log(`[AI Chat] Ignored command from untrusted user: ${username}`);
           return;
         }
@@ -2599,12 +2629,7 @@ function chatModule(bot) {
             aiAgent.start(target, username);
             sendAIChatMessage(`${username}: Sygget engaged — working on that now. Use !ai status to check progress.`);
           } else {
-            const isQuestion = /\?$/.test(aiCommand.text) ||
-              /^(?:who|what|how|why|when|where|which|can|could|would|will|is|are|does|do|did|tell|joke|calc|calculate|recipe|status|help)\b/i.test(aiCommand.text);
             aiAgent.start(aiCommand.text, username);
-            if (!isQuestion) {
-              sendAIChatMessage(`${username}: Got it. I'm working on that now; use !ai status to check progress.`);
-            }
           }
         } catch (error) {
           sendAIChatMessage(error.message);
@@ -2624,16 +2649,19 @@ function chatModule(bot) {
       const botName = bot.username || 'virgo';
       const mentionsBot = new RegExp(`\\b${botName}\\b|^bot\\b|^hey bot\\b`, 'i').test(plainMessage);
       const trustedChatter = config.ai?.enabled && isAIChatAuthorized(username, aiAllowedUsers);
+      const publicChatter = config.ai?.enabled && config.ai?.respondToAllChat !== false;
       let shouldHandle = false;
       let cleanedMessage = plainMessage;
-      if (trustedChatter && plainMessage && !/^[!/]/.test(plainMessage)) {
+      if ((trustedChatter || publicChatter) && plainMessage && !/^[!/]/.test(plainMessage)) {
         cleanedMessage = plainMessage.replace(new RegExp(`^(?:hey\\s+)?${botName}[,:]?\\s*`, 'i'), '').trim() || plainMessage;
-        if (mentionsBot) {
+        if (publicChatter && !trustedChatter) {
+          shouldHandle = true;
+        } else if (mentionsBot) {
           shouldHandle = true;
         } else {
           const parsed = parseLocalIntent(cleanedMessage);
-          // Natural conversation is opt-in and limited to the configured allowlist.
-          // Recognized action requests and questions still work when this is off.
+          // Trusted players can talk naturally without a prefix; actions still
+          // pass through the same bounded skills and allowlist.
           shouldHandle = shouldAutoRespondToChat(username, config.ai, aiAllowedUsers) ||
             parsed.type !== 'chat' || parsed.intent === 'question';
         }
@@ -2641,24 +2669,43 @@ function chatModule(bot) {
       if (shouldHandle) {
         const now = Date.now();
         const chatLang = detectLanguage(cleanedMessage);
+        const parsedIntent = parseLocalIntent(cleanedMessage);
+        const conversationOnly = parsedIntent.type === 'chat' || parsedIntent.intent === 'question';
+        if (!trustedChatter) {
+          if (!allowPublicRequest(username, now)) return;
+          if (isPublicFollowRequest(cleanedMessage)) {
+            try { aiAgent.start('follow me', username); }
+            catch (error) { sendAIChatMessage(error.message); }
+            return;
+          }
+          if (aiAgent.supportsIndependentChat()) {
+            void aiAgent.replyToChat(cleanedMessage, username)
+              .then(reply => sendAIChatMessage(reply))
+              .catch(error => sendAIChatMessage(`I couldn't reply right now: ${error.message}`));
+          } else {
+            sendAIChatMessage('I cannot answer public chat right now because no independent chat model is configured.');
+          }
+          return;
+        }
         const last = lastAutoResponseAt.get(username.toLowerCase()) || 0;
         if (now - last < 2000) {
           sendAIChatMessage(`${username}: Give me a moment between requests.`);
           return;
         }
         lastAutoResponseAt.set(username.toLowerCase(), now);
+        if (conversationOnly && aiAgent.supportsIndependentChat()) {
+          void aiAgent.replyToChat(cleanedMessage, username)
+            .then(reply => sendAIChatMessage(reply))
+            .catch(error => sendAIChatMessage(`I couldn't reply right now: ${error.message}`));
+          return;
+        }
         const isControlRequest = /^(?:please\s+)?(?:stop|halt|cancel|abort|enough|pause|resume|continue|keep going)\b/i.test(plainMessage);
         if (['working', 'paused'].includes(aiAgent.getStatus().status) && !isControlRequest) {
           sendAIChatMessage(`${username}: ${localizedReply('stillWorking', chatLang)}`);
           return;
         }
         try {
-          const isQuestion = /\?$/.test(cleanedMessage) ||
-            /^(?:who|what|how|why|when|where|which|can|could|would|will|is|are|does|do|did|tell|joke|calc|calculate|recipe|status|help)\b/i.test(cleanedMessage);
           aiAgent.start(cleanedMessage, username);
-          if (!isQuestion) {
-            sendAIChatMessage(`${username}: ${localizedReply('working', chatLang)}`);
-          }
         } catch (error) {
           sendAIChatMessage(`${username}: ${error.message}`);
         }
