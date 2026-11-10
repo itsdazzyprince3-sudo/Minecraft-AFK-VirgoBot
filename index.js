@@ -9,6 +9,7 @@ const { Movements, pathfinder, goals } = require('mineflayer-pathfinder');
 const { GoalBlock, GoalNearXZ } = goals;
 const { AIAgent } = require('./lib/ai-agent');
 const {
+  createPublicChatRateLimiter,
   createTrustedChatMemoryNote,
   getAIChatAllowedUsers,
   isPublicFollowRequest,
@@ -2093,6 +2094,9 @@ function initializeModules(bot, mcData, defaultMove, authPassword) {
   const aiAllowedUsers = getAIChatAllowedUsers(config.ai, config.chat);
   if (config.ai?.enabled) {
     console.log(`[AI Chat] Commands enabled; trusted users: ${aiAllowedUsers.join(', ') || '(none configured)'}.`);
+    const publicChatEnabled = config.ai.respondToAllChat !== false;
+    const independentChatReady = aiAgent.supportsIndependentChat();
+    console.log(`[AI Chat] Public replies ${publicChatEnabled ? 'enabled' : 'disabled'}; independent chat model ${independentChatReady ? 'available' : 'unavailable'} (provider: ${aiAgent.resolveProvider()}).`);
   } else {
     console.log('[AI Chat] AI commands disabled; set ai.enabled=true in settings.json.');
   }
@@ -2511,14 +2515,13 @@ function chatModule(bot) {
 
   const aiAllowedUsers = getAIChatAllowedUsers(config.ai, config.chat);
   const lastAutoResponseAt = new Map();
-  let lastPublicReplyAt = 0;
+  const rateLimitPublicRequest = createPublicChatRateLimiter();
   const allowPublicRequest = (username, now = Date.now()) => {
-    const key = String(username || '').toLowerCase();
-    const last = lastAutoResponseAt.get(key) || 0;
-    if (now - last < 2000 || now - lastPublicReplyAt < 2500) return false;
-    lastAutoResponseAt.set(key, now);
-    lastPublicReplyAt = now;
-    return true;
+    const result = rateLimitPublicRequest(username, now);
+    if (!result.allowed && result.notify) {
+      sendAIChatMessage(`${username}: I saw your message. Please wait a few seconds between public requests.`);
+    }
+    return result.allowed;
   };
 
   bot.on('chat', (username, message) => {

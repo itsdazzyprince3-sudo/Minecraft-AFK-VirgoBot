@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { MAX_MEMORY_NOTE_LENGTH } = require('../lib/ai-memory');
 const {
+  createPublicChatRateLimiter,
   createTrustedChatMemoryNote,
   getAIChatAllowedUsers,
   isPublicFollowRequest,
@@ -84,6 +85,15 @@ test('public follow requests can only target the speaker themself', () => {
   assert.equal(isPublicFollowRequest('please follow me!'), true);
   assert.equal(isPublicFollowRequest('follow me for 45 seconds'), true);
   assert.equal(isPublicFollowRequest('follow someoneElse'), false);
+});
+
+test('public chat rate limits return a notice instead of silently discarding every rapid message', () => {
+  const allow = createPublicChatRateLimiter();
+  assert.deepEqual(allow('player1', 10000), { allowed: true, notify: false });
+  assert.deepEqual(allow('player1', 10500), { allowed: false, notify: true });
+  assert.deepEqual(allow('player1', 12000), { allowed: false, notify: false });
+  assert.deepEqual(allow('player2', 12000), { allowed: false, notify: true });
+  assert.deepEqual(allow('player1', 13000), { allowed: true, notify: false });
 });
 
 test('trusted chat memory includes only allowlisted players and bounds note length', () => {
