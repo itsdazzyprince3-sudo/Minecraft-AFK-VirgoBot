@@ -418,6 +418,33 @@ test('follow refuses distant players and stops immediately at critical health', 
   assert.equal(stopped, true);
 });
 
+test('long follow is bounded by player distance, not the bot starting location', async () => {
+  const target = { position: new Vec3(2, 64, 0) };
+  const bot = {
+    entity: { position: new Vec3(0, 64, 0) },
+    health: 20,
+    players: { virgo: { entity: target } },
+    entities: {},
+    pathfinder: {
+      setGoal: () => {
+        bot.entity.position = new Vec3(70, 64, 0);
+        target.position = new Vec3(72, 64, 0);
+      },
+      stop: () => {}
+    }
+  };
+  const skills = makeSkills(bot);
+  let lookups = 0;
+  skills.playerEntity = () => {
+    lookups += 1;
+    if (lookups === 2) bot.health = 5;
+    return target;
+  };
+  const result = await skills.followPlayer('requester', 10 * 60 * 1000);
+  assert.match(result.message, /health is low/i);
+  assert.doesNotMatch(result.message, /64 blocks/i);
+});
+
 test('sortChests deposits surplus materials while preserving tools and primary food', async () => {
   const deposited = [];
   const fakeChestWindow = {

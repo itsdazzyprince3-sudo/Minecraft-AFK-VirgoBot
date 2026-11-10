@@ -26,6 +26,8 @@ test('AI chat command parser accepts slash and chat-prefix forms', () => {
   assert.deepEqual(parseAIChatCommand('/ai resume grinding'), { type: 'resume' });
   assert.deepEqual(parseAIChatCommand('!ai fullauto'), { type: 'fullauto', action: 'start' });
   assert.deepEqual(parseAIChatCommand('/ai full autonomy'), { type: 'fullauto', action: 'start' });
+  assert.deepEqual(parseAIChatCommand('!ai campaign'), { type: 'fullauto', action: 'start' });
+  assert.deepEqual(parseAIChatCommand('/ai campaign stop'), { type: 'fullauto', action: 'stop' });
   assert.deepEqual(parseAIChatCommand('!ai stop fullauto'), { type: 'fullauto', action: 'stop' });
   assert.deepEqual(parseAIChatCommand('/ai autoplay off'), { type: 'fullauto', action: 'stop' });
   assert.deepEqual(parseAIChatCommand('!ai'), { type: 'help' });
@@ -80,6 +82,7 @@ test('allowlisted users can start normal conversation without a prefix by defaul
 test('public follow requests can only target the speaker themself', () => {
   assert.equal(isPublicFollowRequest('follow'), true);
   assert.equal(isPublicFollowRequest('please follow me!'), true);
+  assert.equal(isPublicFollowRequest('follow me for 45 seconds'), true);
   assert.equal(isPublicFollowRequest('follow someoneElse'), false);
 });
 

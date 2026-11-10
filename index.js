@@ -2679,7 +2679,9 @@ function chatModule(bot) {
         if (!trustedChatter) {
           if (!allowPublicRequest(username, now)) return;
           if (isPublicFollowRequest(cleanedMessage)) {
-            try { aiAgent.start('follow me', username); }
+            const followIntent = parseLocalIntent(cleanedMessage);
+            const followSeconds = Math.max(5, Math.min(60, Math.ceil((followIntent.durationMs || 60000) / 1000)));
+            try { aiAgent.start(`follow me for ${followSeconds} seconds`, username); }
             catch (error) { sendAIChatMessage(error.message); }
             return;
           }

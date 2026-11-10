@@ -41,6 +41,10 @@ test('local intent parser maps common Minecraft chat tasks to bounded skills', (
     skill: 'deliverToPlayer', args: { item: 'oak_log', count: 8, player: 'tarun' }
   });
   assert.equal(parseLocalIntent('follow me').type, 'follow');
+  assert.equal(parseLocalIntent('follow me').durationMs, 10 * 60 * 1000);
+  assert.equal(parseLocalIntent('follow me for 90 seconds').durationMs, 90 * 1000);
+  assert.equal(parseLocalIntent('follow me for 20 minutes').durationMs, 10 * 60 * 1000);
+  assert.equal(parseLocalIntent('mere peeche aao').durationMs, 10 * 60 * 1000);
   assert.deepEqual(parseLocalIntent('grind wood').goal, 'wood');
   assert.equal(planForIntent(parseLocalIntent('come'))[0].skill, 'comeToPlayer');
 });

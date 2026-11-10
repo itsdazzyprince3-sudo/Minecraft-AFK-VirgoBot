@@ -198,15 +198,24 @@ placement are supported.
 `ai.autonomous.mode: "local"`, Virgo chooses short goals from health, hunger,
 inventory, nearby threats, and stored skill history without spending cloud API
 quota. The normal background gather mode stays bounded; an allowlisted player
-can explicitly start broader survival play with `!ai fullauto` and stop it with
-`!ai stop fullauto`. Fullauto handles food, basic tools, shelter, crafting and
-smelting, and nearby natural logs, stone, coal, and iron. Mining batches are
+can explicitly start broader survival play with `!ai fullauto` (or `!ai campaign`)
+and stop it with `!ai stop fullauto` (or `!ai campaign stop`). Fullauto handles
+food, basic tools, shelter, crafting and smelting, and nearby natural logs,
+stone, coal, and iron. Mining batches are
 short, the bot pauses near hostiles, critical health, or hazards, and pathfinding
 temporarily disables block digging so it does not break its way through a
 structure. Protected doors, containers, beds, signs, and blocks near detected
 build markers remain off limits. Use `!ai pause`, `!ai resume`, and `!ai stop`
 to control autonomous play. This is bounded overworld survival automation; it
 does not currently complete Nether/End progression or defeat the Ender Dragon.
+Trusted players can say `follow me` for up to 10 minutes or give a shorter
+duration; use `!ai stop` to end following. It pauses for low health, nearby
+hostiles, or when the player is no longer visible or more than 64 blocks away.
+Public players can request only a self-follow, limited to 60 seconds. Chat
+replies use a separate conversation channel and do not cancel an active task.
+This remains a server-side
+Mineflayer bot, not a mouse-and-keyboard player; actual client control requires
+the Linux/X11 screen companion and an accessible Minecraft client.
 Progress messages can be disabled with `ai.autonomous.chatProgress`.
 
 Local web lookup for Ollama is opt-in: set `ai.search.enabled` to `true` and

@@ -243,6 +243,7 @@ test('direct Groq conversation preserves an active gameplay task and stores priv
   const previousKey = process.env.GROQ_API_KEY;
   process.env.GROQ_API_KEY = 'test-groq-key';
   const requests = [];
+  let modelReply = 'Doing well! How is your world going?';
   const agent = new AIAgent({
     config: { enabled: true, provider: 'groq', groq: { model: 'test-qwen', apiUrl: 'https://example.test/chat' } },
     getBot: () => ({}),
@@ -250,7 +251,7 @@ test('direct Groq conversation preserves an active gameplay task and stores priv
     memory: noOpMemory,
     fetchImpl: async (url, options) => {
       requests.push({ url, body: JSON.parse(options.body) });
-      return { ok: true, json: async () => ({ choices: [{ message: { content: 'Doing well! How is your world going?' } }] }) };
+      return { ok: true, json: async () => ({ choices: [{ message: { content: modelReply } }] }) };
     }
   });
   agent.state = { ...agent.state, status: 'working', instruction: 'mine wood' };
@@ -262,7 +263,14 @@ test('direct Groq conversation preserves an active gameplay task and stores priv
     assert.equal(agent.autonomyActive, true);
     assert.equal(requests[0].url, 'https://example.test/chat');
     assert.equal(requests[0].body.model, 'test-qwen');
-    assert.deepEqual(agent.chatHistories.get('virgo').map(message => message.role), ['user', 'assistant']);
+    assert.match(requests[0].body.messages[0].content, /Do not announce that you are leaving/i);
+    modelReply = "I'm leaving now.";
+    assert.match(await agent.replyToChat('why are you leaving?', 'Virgo'), /still here and connected/i);
+    assert.equal(agent.getStatus().status, 'working');
+    assert.equal(agent.autonomyActive, true);
+    modelReply = 'Goodbye! See you later.';
+    assert.equal(await agent.replyToChat('bye', 'Virgo'), modelReply);
+    assert.deepEqual(agent.chatHistories.get('virgo').map(message => message.role), ['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
   } finally {
     if (previousKey === undefined) delete process.env.GROQ_API_KEY;
     else process.env.GROQ_API_KEY = previousKey;
