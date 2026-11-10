@@ -1097,9 +1097,10 @@ test('Groq agent run sends chat text as a user query', async () => {
   delete process.env.GROQ_MODEL;
   try {
     let body;
+    let botReads = 0;
     const agent = new AIAgent({
       config: { enabled: true, provider: 'groq', groq: { model: 'qwen/qwen3.8-27b' } },
-      getBot: () => ({}),
+      getBot: () => { botReads += 1; return {}; },
       isConnected: () => true,
       memory: noOpMemory,
       fetchImpl: async (_url, options) => {
@@ -1116,6 +1117,9 @@ test('Groq agent run sends chat text as a user query', async () => {
     assert.equal(body.messages[0].role, 'system');
     assert.equal(body.messages[1].role, 'user');
     assert.equal(body.messages[1].content, 'Are you Groq?');
+    assert.equal(botReads, 1);
+    assert.equal(body.tools, undefined);
+    assert.equal(body.max_tokens, 128);
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];
