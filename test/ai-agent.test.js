@@ -254,8 +254,10 @@ test('AI task uses the configured model API and can finish a task', async () => 
     assert.equal(request.options.headers.Authorization, 'Bearer test-key');
     const body = JSON.parse(request.options.body);
     assert.equal(body.model, 'test-model');
-  assert.equal(body.messages[0].role, 'system');
-  assert.match(body.messages[0].content, /Mine stone\./);
+    assert.equal(body.messages[0].role, 'system');
+    assert.match(body.messages[0].content, /Mine stone\./);
+    assert.equal(body.messages[1].role, 'user');
+    assert.equal(body.messages[1].content, 'Mine stone.');
     assert.match(body.messages[0].content, /Reason privately.*Verify the structured game state/s);
   } finally {
     if (previousKey === undefined) delete process.env.AI_API_KEY;
@@ -1078,6 +1080,42 @@ test('Groq provider uses its dedicated key, endpoint, model, and chat-completion
     const response = await agent.requestModel([{ role: 'user', content: 'Hello' }]);
     assert.equal(called, true);
     assert.equal(response.choices[0].message.content, 'Groq works.');
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('Groq agent run sends chat text as a user query', async () => {
+  const keys = ['GROQ_API_KEY', 'GROQ_API_URL', 'GROQ_MODEL', 'AI_PROVIDER'];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  process.env.GROQ_API_KEY = 'test-groq-key';
+  process.env.AI_PROVIDER = 'groq';
+  delete process.env.GROQ_API_URL;
+  delete process.env.GROQ_MODEL;
+  try {
+    let body;
+    const agent = new AIAgent({
+      config: { enabled: true, provider: 'groq', groq: { model: 'qwen/qwen3.8-27b' } },
+      getBot: () => ({}),
+      isConnected: () => true,
+      memory: noOpMemory,
+      fetchImpl: async (_url, options) => {
+        body = JSON.parse(options.body);
+        return { ok: true, json: async () => ({ choices: [{ message: { role: 'assistant', content: 'Yes, I am Groq.' } }] }) };
+      }
+    });
+    agent.start('Are you Groq?', 'virgo', { forceModel: true });
+    for (let attempt = 0; attempt < 30 && agent.getStatus().status === 'working'; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(agent.getStatus().status, 'completed');
+    assert.equal(agent.getStatus().message, 'Yes, I am Groq.');
+    assert.equal(body.messages[0].role, 'system');
+    assert.equal(body.messages[1].role, 'user');
+    assert.equal(body.messages[1].content, 'Are you Groq?');
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];
