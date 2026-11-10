@@ -242,6 +242,7 @@ function createVisionController() {
     getBot: () => bot,
     isConnected: () => desktopControlEnabled ? Boolean(screenCapture?.status().ready) : botState.connected,
     getPerception: viewFrameServer && !desktopControlEnabled ? () => viewFrameServer.lastPerception : null,
+    shouldYield: () => ['working', 'paused'].includes(aiAgent.getStatus().status),
     getJpegFrame: desktopControlEnabled ? () => screenCapture.getFrame() : null,
     executeAction: desktopControlEnabled ? action => screenCapture.performAction(action) : null,
     viewerUrl: process.env.VIEWER_URL || viewConfig.url || 'http://127.0.0.1:8080',
@@ -2531,13 +2532,21 @@ function chatModule(bot) {
         }
         try {
           if (aiCommand.type === 'help') {
-            sendAIChatMessage('Use !ai <task>, !ai recognize, !ai research <topic>, !ai knowledge [query], !ai train, !ai train status, !ai stop training, !ai skills <search>, !ai skill <id> [count], !ai think <goal>, !ai solve <goal>, !ai brain, !ai why, !ai teach <rule>, !ai memory, !ai forget <text>, !ai status, !ai pause, !ai resume, !ai plugins, !ai vision, or !ai stop.');
+            sendAIChatMessage('Use !ai <task>, !ai fullauto, !ai stop fullauto, !ai recognize, !ai research <topic>, !ai knowledge [query], !ai train, !ai train status, !ai stop training, !ai skills <search>, !ai skill <id> [count], !ai think <goal>, !ai solve <goal>, !ai brain, !ai why, !ai teach <rule>, !ai memory, !ai forget <text>, !ai status, !ai pause, !ai resume, !ai plugins, !ai vision, or !ai stop. Fullauto uses in-game survival skills; it does not grant server OP.');
           } else if (aiCommand.type === 'status') {
             const status = aiAgent.getStatus();
             const grinding = aiAgent.autonomyActive ? 'Autonomous gathering is enabled.' : 'Autonomous gathering is paused.';
             sendAIChatMessage(`${status.status}: ${status.message} ${grinding}`);
           } else if (aiCommand.type === 'stop') {
             aiAgent.stop();
+          } else if (aiCommand.type === 'fullauto') {
+            if (aiCommand.action === 'stop') {
+              aiAgent.stopFullAutonomy();
+              sendAIChatMessage('Full autonomy stopped. I will not start another autonomous goal.');
+            } else {
+              aiAgent.startFullAutonomy();
+              sendAIChatMessage('Full autonomy started. I will choose survival goals and use my available Minecraft skills. Say !ai stop fullauto to stop.');
+            }
           } else if (aiCommand.type === 'pause') {
             const result = aiAgent.pauseAutonomous();
             sendAIChatMessage(result.paused ? 'Autonomous gathering paused.' : 'Autonomous gathering was not active.');

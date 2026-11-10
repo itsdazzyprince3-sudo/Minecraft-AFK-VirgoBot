@@ -31,6 +31,11 @@ test('reflex steers around an obstacle toward the freer side', () => {
   assert.equal(reflexAction(perception({ forwardClear: 0.6, freeCenter: 20, freeLeft: 5, freeRight: 60 })), 'turn_right');
 });
 
+test('reflex does not blind-jump when perception reports no clear corridor', () => {
+  assert.equal(reflexAction(perception({ forwardClear: 0.4, freeCenter: 0, freeLeft: 0, freeRight: 0 })), 'none');
+  assert.equal(reflexAction(perception({ forwardClear: 0.4, freeCenter: 0, freeLeft: undefined, freeRight: undefined })), 'none');
+});
+
 test('reflex refrains from walking off the spawn platform into the void', () => {
   const platform = perception({ groundPct: 4, skyPct: 80, forwardClear: 48, nearest: 48 });
   assert.equal(reflexAction(platform), 'none');
@@ -78,6 +83,28 @@ test('vision dispatches actions through the selected desktop controller', async 
   controller.applyAction('forward');
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(actions, ['forward']);
+});
+
+test('reflex yields controls while a higher-level AI task is active', () => {
+  const controls = [];
+  const bot = {
+    entity: { yaw: 0, pitch: 0 },
+    health: 20,
+    food: 20,
+    setControlState: (key, pressed) => controls.push([key, pressed])
+  };
+  const controller = new VisionController({
+    getBot: () => bot,
+    getPerception: () => perception(),
+    isConnected: () => true,
+    shouldYield: () => true,
+    enabled: true,
+    reflex: true,
+    llm: false
+  });
+  controller.reflexTick();
+  assert.equal(bot.aiScreenControl, false);
+  assert.deepEqual(controls, []);
 });
 
 test('desktop vision tick sends the exact captured JPEG to its model and applies the returned action', async () => {

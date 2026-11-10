@@ -105,6 +105,21 @@ test('autonomous gathering is opt-in and can be paused and resumed', async () =>
   }
 });
 
+test('full autonomy requires opt-in and schedules a cycle immediately', () => {
+  const disabled = new AIAgent({ config: { enabled: true, autonomous: { enabled: false } } });
+  assert.throws(() => disabled.startFullAutonomy(), /disabled/);
+
+  const agent = new AIAgent({ config: { enabled: true, autonomous: { enabled: true } } });
+  const scheduled = [];
+  agent.scheduleAutonomousCycle = delay => scheduled.push(delay);
+  agent.startFullAutonomy();
+  assert.equal(agent.fullAutonomy, true);
+  assert.equal(agent.autonomyActive, true);
+  assert.equal(agent.autonomyGoal, 'auto');
+  assert.deepEqual(scheduled, [0]);
+  agent.stopFullAutonomy();
+});
+
 test('local autonomous mode uses the local planner even when a cloud API key is configured', async () => {
   const previous = {
     apiKey: process.env.AI_API_KEY,

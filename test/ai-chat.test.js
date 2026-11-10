@@ -23,6 +23,10 @@ test('AI chat command parser accepts slash and chat-prefix forms', () => {
   assert.deepEqual(parseAIChatCommand('/ai pause grinding'), { type: 'pause' });
   assert.deepEqual(parseAIChatCommand('!ai resume'), { type: 'resume' });
   assert.deepEqual(parseAIChatCommand('/ai resume grinding'), { type: 'resume' });
+  assert.deepEqual(parseAIChatCommand('!ai fullauto'), { type: 'fullauto', action: 'start' });
+  assert.deepEqual(parseAIChatCommand('/ai full autonomy'), { type: 'fullauto', action: 'start' });
+  assert.deepEqual(parseAIChatCommand('!ai stop fullauto'), { type: 'fullauto', action: 'stop' });
+  assert.deepEqual(parseAIChatCommand('/ai autoplay off'), { type: 'fullauto', action: 'stop' });
   assert.deepEqual(parseAIChatCommand('!ai'), { type: 'help' });
   assert.equal(parseAIChatCommand('hello Virgo'), null);
 });
