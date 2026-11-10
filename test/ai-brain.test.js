@@ -130,6 +130,33 @@ test('autonomous planner sleeps only at night when a bed is available and the ar
   assert.notEqual(unsafeNight.skill, 'sleep');
 });
 
+test('bounded autonomy waits after safe gathering while full autonomy progresses through stone and iron', () => {
+  const memory = { getSkill: () => null, getNotes: () => [] };
+  const inventory = {
+    stone_pickaxe: 1, stone_sword: 1, oak_log: 20,
+    oak_planks: 16, cobblestone: 0, coal: 8, torch: 16
+  };
+  const observation = { health: 20, food: 20, inventory, nearbyHostiles: [], time: { isDay: true } };
+  assert.equal(chooseGoal(observation, memory).skill, 'stay');
+  const fullGoal = chooseGoal(observation, memory, { fullAutonomy: true });
+  assert.equal(fullGoal.skill, 'mine');
+  assert.equal(fullGoal.args.item, 'stone');
+
+  const smeltGoal = chooseGoal({
+    ...observation,
+    inventory: { ...inventory, cobblestone: 24, raw_iron: 4 }
+  }, memory, { fullAutonomy: true });
+  assert.equal(smeltGoal.skill, 'smelt');
+  assert.equal(smeltGoal.args.item, 'iron_ingot');
+
+  const nightGoal = chooseGoal({
+    ...observation,
+    time: { isDay: false },
+    shelter: false
+  }, memory, { fullAutonomy: true });
+  assert.equal(nightGoal.skill, 'buildShelter');
+});
+
 test('explicit wood-grind goals override the automatic failure cooldown', () => {
   const memory = { getSkill: name => name === 'goal:gatherWood' ? {
     failures: 1,

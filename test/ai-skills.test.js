@@ -336,6 +336,13 @@ test('local mining guard recognizes interactable home blocks and nearby build ma
   assert.equal(skills.isProtectedMiningTarget(bot, { name: 'stone', position: new Vec3(20, 64, 0) }), false);
 });
 
+test('ore aliases include deepslate variants when the normal ore is registered', () => {
+  const bot = { registry: { blocksByName: { coal_ore: { id: 1 }, iron_ore: { id: 2 } } } };
+  const skills = makeSkills(bot);
+  assert.deepEqual(skills.blockNamesForItem('coal_ore'), ['coal_ore', 'deepslate_coal_ore']);
+  assert.deepEqual(skills.blockNamesForItem('iron_ore'), ['iron_ore', 'deepslate_iron_ore']);
+});
+
 test('autonomous mining is restricted to tree logs in the deterministic skill layer', async () => {
   const bot = { registry: { blocksByName: { stone: { id: 1 } } } };
   const skills = new AISkills({
@@ -345,6 +352,47 @@ test('autonomous mining is restricted to tree logs in the deterministic skill la
     runId: 1
   });
   await assert.rejects(skills.mine('stone'), /restricted to natural tree logs/i);
+});
+
+test('full autonomy allows whitelisted resource goals but rejects unplanned ores', async () => {
+  const bot = {
+    entity: { position: new Vec3(0, 64, 0) },
+    health: 20,
+    entities: {},
+    registry: { blocksByName: { stone: { id: 1 }, gold_ore: { id: 2 }, deepslate_gold_ore: { id: 3 } } },
+    inventory: { items: () => [] },
+    findBlocks: () => []
+  };
+  const skills = new AISkills({
+    agent: { runId: 1, isAutonomousTask: true, fullAutonomy: true },
+    getBot: () => bot,
+    memory: null,
+    runId: 1
+  });
+  skills.explore = async () => {};
+  await assert.rejects(skills.mine('stone', 1), /could not find reachable stone/);
+  await assert.rejects(skills.mine('gold_ore'), /other ores are excluded/i);
+});
+
+test('autonomous movement disables pathfinder digging and restores its prior setting', async () => {
+  const movements = { canDig: true };
+  let observedCanDig;
+  const bot = {
+    pathfinder: {
+      movements,
+      goto: async () => { observedCanDig = movements.canDig; return 'reached'; },
+      stop: () => {}
+    }
+  };
+  const skills = new AISkills({
+    agent: { runId: 1, isAutonomousTask: true, fullAutonomy: true },
+    getBot: () => bot,
+    memory: null,
+    runId: 1
+  });
+  assert.equal(await skills.goto({}), 'reached');
+  assert.equal(observedCanDig, false);
+  assert.equal(movements.canDig, true);
 });
 
 test('follow refuses distant players and stops immediately at critical health', async () => {

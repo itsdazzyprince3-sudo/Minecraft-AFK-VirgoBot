@@ -2580,7 +2580,7 @@ function chatModule(bot) {
               sendAIChatMessage('Full autonomy stopped. I will not start another autonomous goal.');
             } else {
               aiAgent.startFullAutonomy();
-              sendAIChatMessage('Full autonomy started. I will choose survival goals and use my available Minecraft skills. Say !ai stop fullauto to stop.');
+              sendAIChatMessage('Full survival autonomy started: I will manage food, basic tools, shelter, and nearby natural stone/coal/iron resources. I will not dig while pathing or mine protected builds. Say !ai stop fullauto to stop.');
             }
           } else if (aiCommand.type === 'pause') {
             const result = aiAgent.pauseAutonomous();

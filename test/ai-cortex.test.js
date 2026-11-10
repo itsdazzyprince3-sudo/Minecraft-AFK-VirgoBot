@@ -58,12 +58,38 @@ test('brain autonomy prefers a tool upgrade when no urgent need exists', () => {
     memory: null,
     config: {},
     reasoner: reasoner(),
-    autonomyGoal: 'auto'
+    autonomyGoal: 'auto',
+    fullAutonomy: true
   });
   assert.equal(decision.kind, 'goal');
   assert.equal(decision.goal.skill, 'ensureItem');
   assert.match(decision.goal.args.item, /pickaxe/);
   assert.ok(decision.thought.join(' ').includes('calm window'));
+});
+
+test('bounded autonomy avoids curiosity mining while fullauto mines only supported nearby resources', () => {
+  const observation = {
+    health: 20,
+    food: 20,
+    inventory: {
+      diamond_pickaxe: 1, iron_sword: 1, oak_log: 32, cobblestone: 32,
+      coal: 32, torch: 32
+    },
+    nearbyHostiles: [],
+    time: { isDay: true }
+  };
+  const cortex = createCortex();
+  const bounded = cortex.recommendAutonomy({
+    observation, memory: null, config: {}, reasoner: reasoner(), autonomyGoal: 'auto'
+  });
+  assert.equal(bounded.goal.skill, 'stay');
+
+  const full = cortex.recommendAutonomy({
+    observation, memory: null, config: {}, reasoner: reasoner(), autonomyGoal: 'auto', fullAutonomy: true
+  });
+  if (full.goal.skill === 'mine') {
+    assert.ok(['stone', 'coal_ore', 'iron_ore'].includes(full.goal.args.item));
+  }
 });
 
 test('brain reflection diagnoses route and missing-item failures', () => {

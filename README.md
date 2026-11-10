@@ -197,13 +197,17 @@ placement are supported.
 `ai.autonomous.enabled` opts into local grinding. With
 `ai.autonomous.mode: "local"`, Virgo chooses short goals from health, hunger,
 inventory, nearby threats, and stored skill history without spending cloud API
-quota; `!ai grind wood` selects a resource goal. Use `!ai pause`, `!ai resume`,
-and `!ai stop` to control it. The local interval is configurable through
-`ai.autonomous.intervalMs`. Autonomous logging/mining is capped to short batches
-and pauses near hostiles, critical health, nearby hazards, or targets with large
-vertical gaps. At night, the planner prefers a safe bed; if none is available it
-can choose shelter work. Progress messages can be disabled with
-`ai.autonomous.chatProgress`.
+quota. The normal background gather mode stays bounded; an allowlisted player
+can explicitly start broader survival play with `!ai fullauto` and stop it with
+`!ai stop fullauto`. Fullauto handles food, basic tools, shelter, crafting and
+smelting, and nearby natural logs, stone, coal, and iron. Mining batches are
+short, the bot pauses near hostiles, critical health, or hazards, and pathfinding
+temporarily disables block digging so it does not break its way through a
+structure. Protected doors, containers, beds, signs, and blocks near detected
+build markers remain off limits. Use `!ai pause`, `!ai resume`, and `!ai stop`
+to control autonomous play. This is bounded overworld survival automation; it
+does not currently complete Nether/End progression or defeat the Ender Dragon.
+Progress messages can be disabled with `ai.autonomous.chatProgress`.
 
 Local web lookup for Ollama is opt-in: set `ai.search.enabled` to `true` and
 provide `TAVILY_API_KEY` in `.env`. Queries go to Tavily only for explicit web
@@ -916,7 +920,7 @@ from `settings.example.json`:
 | `ai.allowedUsers` | placeholder username | Replace `YOUR_MINECRAFT_USERNAME` with your own name; only trusted users can issue gameplay tasks and AI control commands. |
 | `ai.respondToTrustedChat` | `true` | Lets allowlisted players talk naturally without `!ai`. Missing older keys default to on unless explicitly set to `false`. |
 | `ai.respondToAllChat` | `true` | Lets any player receive AI conversation replies. Public chat uses the model/API quota and is globally rate-limited; it does not grant gameplay commands. Anyone may ask the bot to follow only themselves for a short, bounded time. |
-| `ai.autonomous.enabled` | `false` | Turns on periodic autonomous behavior. Autonomous mining is limited to exposed tree logs with nearby leaves; doors and blocks near obvious build markers are protected. |
+| `ai.autonomous.enabled` | `false` | Allows periodic autonomous behavior and the trusted `!ai fullauto` survival mode. Fullauto is bounded to nearby natural resources and pauses or refuses unsafe routes. |
 | `utils.auto-reconnect` | `true` | Reconnects after the server or network drops. Usually leave on. |
 | `utils.auto-auth.enabled` | `false` | Use only if your server has an AuthMe-like login plugin; its password is private. |
 | `movement.circle-walk.enabled` | `true` | Patrols around the bot's spawn position when the AFK movement module is active. |
