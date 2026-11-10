@@ -25,6 +25,11 @@ git clone "$REPOSITORY" "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 npm ci
 
+if [[ ! -f .env ]]; then
+  cp .env.example .env
+  chmod 600 .env 2>/dev/null || true
+fi
+
 if [[ ! -f settings.json ]]; then
   cp settings.example.json settings.json
   chmod 600 settings.json 2>/dev/null || true
@@ -33,14 +38,17 @@ fi
 cat <<EOF
 
 Installation complete.
+Private API configuration: $INSTALL_DIR/.env
 Private settings file: $INSTALL_DIR/settings.json
 
 Next steps:
   cd "$INSTALL_DIR"
+  nano .env       # replace YOUR_GROQ_API_KEY_HERE with your Groq key
   nano settings.json
   npm start
 
 In settings.json, enter your server address and port, bot username, and your
 Minecraft username under ai.allowedUsers. Keep settings.json private; it is
-ignored by Git. The bot has not been started by this installer.
+ignored by Git. The .env file is also ignored by Git. The bot has not been
+started by this installer.
 EOF

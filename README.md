@@ -440,19 +440,21 @@ provider or dashboard secrets in `settings.json` or commit them:
 | `DISCORD_RELAY_TOKEN` | Secret for `POST /api/discord/chat`. If unset, the relay only accepts a valid `DASHBOARD_TOKEN` |
 | `HOST` | Interface the web server binds to. Defaults to `127.0.0.1`, or `0.0.0.0` when the host platform sets `PORT` |
 
-To use Groq, create one API key in the Groq Console, then add the following to
-the bot host's private `.env` file. The model value below matches the model
-requested by this project; check your Groq plan and current model pricing before
-using it, because availability and charges depend on your account tier.
+New installs create `.env` from `.env.example` automatically. For an existing
+checkout, this command copies the template only if `.env` is missing or empty,
+then opens it for editing:
 
-```dotenv
-AI_PROVIDER=groq
-GROQ_API_KEY=PASTE_YOUR_GROQ_KEY_HERE
-GROQ_MODEL=qwen/qwen3.8-27b
-GROQ_API_URL=https://api.groq.com/openai/v1/chat/completions
+```sh
+cd ~/Minecraft-AFK-VirgoBot
+if [ ! -s .env ]; then cp .env.example .env && chmod 600 .env; fi
+nano .env
 ```
 
-Restart the bot after saving `.env`. `AI_PROVIDER=auto` also selects Groq when
+The file is prefilled with the Groq provider, endpoint and model. Replace only
+`YOUR_GROQ_API_KEY_HERE` with your key from the Groq Console. The default model
+matches the model requested by this project; check your Groq plan and current
+model pricing before using it, because availability and charges depend on your
+account tier. Restart the bot after saving `.env`. `AI_PROVIDER=auto` also selects Groq when
 `GROQ_API_KEY` is present. The bot uses one Groq key per process; when Groq
 returns HTTP 429, it does not cycle through other keys or accounts to bypass
 quota limits. The task is stopped and autonomous gathering pauses instead of
