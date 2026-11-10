@@ -419,6 +419,9 @@ provider or dashboard secrets in `settings.json` or commit them:
 | Variable | What it does |
 |----------|--------------|
 | `AI_API_KEY` | Gemini or compatible provider key |
+| `GROQ_API_KEY` | Groq API key; with `AI_PROVIDER=auto`, Groq is selected when this key is set |
+| `GROQ_MODEL` | Optional Groq model override; defaults to `qwen/qwen3.8-27b` |
+| `GROQ_API_URL` | Optional Groq chat-completions endpoint override |
 | `LUNAX_API_KEY` | Optional Lunax API key; with `AI_PROVIDER=auto`, this selects `lunax-chat` |
 | `LUNAX_MODEL` | Optional Lunax model override; defaults to `lunax-chat` |
 | `LUNAX_API_URL` | Optional Lunax chat-completions endpoint override |
@@ -429,13 +432,31 @@ provider or dashboard secrets in `settings.json` or commit them:
 | `OPENAI_API_KEY` | Optional OpenAI key; with `AI_PROVIDER=auto`, selected when no Meta key is set |
 | `AI_MODEL` | Optional override; defaults to `gemini-3.5-flash-lite` |
 | `AI_API_URL` | Optional endpoint override; defaults to the selected provider endpoint |
-| `AI_PROVIDER` | `auto`, `local`, `gemini`, `openai`, `meta`, or `lunax`; `auto` uses local Ollama without a cloud key |
+| `AI_PROVIDER` | `auto`, `local`, `gemini`, `groq`, `openai`, `meta`, or `lunax`; `auto` selects Groq first when `GROQ_API_KEY` is set, otherwise uses configured provider keys or local Ollama |
 | `OPENAI_API_URL` | Optional OpenAI-compatible chat endpoint override |
 | `OPENAI_MODEL` | Optional OpenAI model override; defaults to `gpt-5.5` |
 | `OPENAI_REASONING_EFFORT` | OpenAI reasoning level: `low`, `medium`, `high`, or `xhigh` (defaults to `low`) |
 | `DASHBOARD_TOKEN` | Required private token for submitting and stopping tasks from the dashboard |
 | `DISCORD_RELAY_TOKEN` | Secret for `POST /api/discord/chat`. If unset, the relay only accepts a valid `DASHBOARD_TOKEN` |
 | `HOST` | Interface the web server binds to. Defaults to `127.0.0.1`, or `0.0.0.0` when the host platform sets `PORT` |
+
+To use Groq, create one API key in the Groq Console, then add the following to
+the bot host's private `.env` file. The model value below matches the model
+requested by this project; check your Groq plan and current model pricing before
+using it, because availability and charges depend on your account tier.
+
+```dotenv
+AI_PROVIDER=groq
+GROQ_API_KEY=PASTE_YOUR_GROQ_KEY_HERE
+GROQ_MODEL=qwen/qwen3.8-27b
+GROQ_API_URL=https://api.groq.com/openai/v1/chat/completions
+```
+
+Restart the bot after saving `.env`. `AI_PROVIDER=auto` also selects Groq when
+`GROQ_API_KEY` is present. The bot uses one Groq key per process; when Groq
+returns HTTP 429, it does not cycle through other keys or accounts to bypass
+quota limits. The task is stopped and autonomous gathering pauses instead of
+repeatedly sending requests. Keep `.env` private and never commit a real key.
 
 To use Lunax, add `LUNAX_API_KEY` to `.env`; `AI_PROVIDER=auto` selects it
 when present and uses `lunax-chat` at `https://lunax.co/api/v1/chat/completions`.

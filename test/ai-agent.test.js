@@ -1045,6 +1045,67 @@ test('autonomous grinding backs off and pauses after three failed cycles', async
   assert.equal(agent.getStatus().status, 'paused');
 });
 
+test('Groq provider uses its dedicated key, endpoint, model, and chat-completions tool format', async () => {
+  const keys = ['GROQ_API_KEY', 'GROQ_API_URL', 'GROQ_MODEL', 'AI_PROVIDER', 'AI_API_KEY', 'OPENAI_API_KEY'];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  process.env.GROQ_API_KEY = 'test-groq-key';
+  process.env.AI_PROVIDER = 'groq';
+  delete process.env.GROQ_API_URL;
+  delete process.env.GROQ_MODEL;
+  delete process.env.AI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    let called = false;
+    const agent = new AIAgent({
+      config: { enabled: true, provider: 'groq' },
+      getBot: () => null,
+      isConnected: () => false,
+      fetchImpl: async (url, options) => {
+        called = true;
+        assert.equal(url, 'https://api.groq.com/openai/v1/chat/completions');
+        assert.equal(options.headers.Authorization, 'Bearer test-groq-key');
+        const body = JSON.parse(options.body);
+        assert.equal(body.model, 'qwen/qwen3.8-27b');
+        assert.equal(body.parallel_tool_calls, false);
+        assert.ok(Array.isArray(body.tools));
+        return { ok: true, json: async () => ({ choices: [{ message: { content: 'Groq works.' } }] }) };
+      }
+    });
+    assert.equal(agent.resolveProvider(), 'groq');
+    assert.equal(agent.modelEndpoint(), 'https://api.groq.com/openai/v1/chat/completions');
+    assert.equal(agent.modelName(), 'qwen/qwen3.8-27b');
+    assert.equal(agent.modelApiKey(), 'test-groq-key');
+    const response = await agent.requestModel([{ role: 'user', content: 'Hello' }]);
+    assert.equal(called, true);
+    assert.equal(response.choices[0].message.content, 'Groq works.');
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('auto provider selects Groq when its dedicated key is configured', () => {
+  const keys = ['GROQ_API_KEY', 'AI_PROVIDER', 'LUNAX_API_KEY', 'MODEL_API_KEY', 'OPENAI_API_KEY', 'AI_API_KEY'];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  process.env.GROQ_API_KEY = 'test-groq-key';
+  delete process.env.AI_PROVIDER;
+  delete process.env.LUNAX_API_KEY;
+  delete process.env.MODEL_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.AI_API_KEY;
+  try {
+    const agent = new AIAgent({ config: { enabled: true, provider: 'auto' }, getBot: () => null, isConnected: () => false });
+    assert.equal(agent.resolveProvider(), 'groq');
+    assert.equal(agent.modelApiKey(), 'test-groq-key');
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
 
 test('Lunax provider sends OpenAI-compatible chat-completions requests', async () => {
   const keys = ['LUNAX_API_KEY', 'LUNAX_API_URL', 'LUNAX_MODEL', 'AI_PROVIDER', 'MODEL_API_KEY', 'OPENAI_API_KEY', 'AI_API_KEY'];

@@ -91,6 +91,10 @@
     "scanDistance": 12,
     "scanCount": 48,
     "model": "gemini-3.5-flash-lite",
+    "groq": {
+      "model": "qwen/qwen3.8-27b",
+      "apiUrl": "https://api.groq.com/openai/v1/chat/completions"
+    },
     "openai": {
       "model": "gpt-5.5",
       "reasoningEffort": "low",
