@@ -16,7 +16,7 @@
     "mineflayer-pathfinder": "2.4.5",
     "prismarine-chunk": "file:vendor/prismarine-chunk",
     "prismarine-physics": "file:vendor/prismarine-physics",
-    "vec3": "^0.1.10"
+    "vec3": "^0.2.0"
   },
   "devDependencies": {
     "eslint": "^10.8.1"
